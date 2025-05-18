@@ -37,18 +37,81 @@ assets = {
 active_trades = {}
 last_summary_time = time.time()
 
-def fetch_data(symbol):
+def fetch_data(symbol, name=""):
     url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=60d&interval=1h"
     try:
         response = requests.get(url)
         data = response.json()
+
+        if not data.get("chart") or not data["chart"].get("result"):
+            send_telegram_message(f"#{name} | ❌ لا توجد بيانات في result من ياهو.")
+            return None
+
+        result = data["chart"]["result"][0]
+
+        if "timestamp" not in result or "indicators" not in result or "quote" not in result["indicators"]:
+            send_telegram_message(f"#{name} | ❌ بيانات مفقودة: timestamp أو quote.")
+            return None
+
+        timestamps = result["timestamp"]
+        quote = result["indicators"]["quote"][0]
+
+        for key in ["close", "open", "high", "low"]:
+            if key not in quote:
+                send_telegram_message(f"#{name} | ❌ العمود '{key}' غير موجود في البيانات.")
+                return None
+
+        df = pd.DataFrame({
+            "Close": quote["close"],
+            "Open": quote["open"],
+            "High": quote["high"],
+            "Low": quote["low"]
+        })
+
+        df["Date"] = pd.to_datetime(timestamps, unit="s")
+        df.set_index("Date", inplace=True)
+        return df.tail(1000)
+
+    except Exception as e:
+        send_telegram_message(f"#{name} | ❌ استثناء أثناء جلب البيانات:\n{str(e)}")
+        return None
+
+        result = data["chart"]["result"][0]
+        timestamps = result.get("timestamp")
+        indicators = result.get("indicators", {})
+        quote = indicators.get("quote", [{}])[0]
+
+        # التحقق من توفر الأعمدة
+        required_keys = ["open", "high", "low", "close"]
+        for key in required_keys:
+            if key not in quote:
+                print(f"{symbol} | البيانات ناقصة: {key} غير موجود.")
+                return None
+
+        df = pd.DataFrame({
+            "Open": quote["open"],
+            "High": quote["high"],
+            "Low": quote["low"],
+            "Close": quote["close"]
+        })
+
+        df["Date"] = pd.to_datetime(timestamps, unit="s")
+        df.set_index("Date", inplace=True)
+        return df.tail(1000)
+
+    except Exception as e:
+        print(f"{symbol} | خطأ أثناء جلب البيانات: {e}")
+        return None
+
         timestamps = data["chart"]["result"][0]["timestamp"]
         prices = data["chart"]["result"][0]["indicators"]["quote"][0]
         df = pd.DataFrame(prices)
         df["Date"] = pd.to_datetime(timestamps, unit="s")
         df.set_index("Date", inplace=True)
-        return df.tail(1000)
-    except:
+        return df.dropna().tail(1000)
+
+    except Exception as e:
+        print(f"fetch_data error: {e}")
         return None
 
 def calculate_indicators(df):
