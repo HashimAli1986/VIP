@@ -18,8 +18,9 @@ def keep_alive():
     t = Thread(target=run)
     t.start()
 
-BOT_TOKEN = "توكن_البوت_هنا"
-CHANNEL_ID = "@اسم_القناة_هنا"
+# إعداد التوكن والقناة
+BOT_TOKEN = "7883771248:AAFfwmcF3hcHz17_IG0KfyOCSGLjMBzyg8E"
+CHANNEL_ID = "@hashimali1986"
 
 def send_telegram_message(text):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
@@ -38,8 +39,11 @@ last_summary_time = time.time()
 
 def fetch_data(symbol):
     url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=60d&interval=1h"
+    headers = {
+        "User-Agent": "Mozilla/5.0"
+    }
     try:
-        response = requests.get(url)
+        response = requests.get(url, headers=headers)
         data = response.json()
         timestamps = data["chart"]["result"][0]["timestamp"]
         prices = data["chart"]["result"][0]["indicators"]["quote"][0]
@@ -47,7 +51,8 @@ def fetch_data(symbol):
         df["Date"] = pd.to_datetime(timestamps, unit="s")
         df.set_index("Date", inplace=True)
         return df.tail(1000)
-    except:
+    except Exception as e:
+        print("fetch error:", e)
         return None
 
 def calculate_indicators(df):
@@ -132,5 +137,5 @@ def main_loop():
 
 if __name__ == "__main__":
     keep_alive()
-    send_telegram_message("تم تشغيل المحلل الذكي بنجاح.")
+    send_telegram_message("✅ تم تشغيل المحلل الذكي بنجاح وجاهز لإرسال التوصيات.")
     main_loop()
