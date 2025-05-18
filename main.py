@@ -25,7 +25,10 @@ CHANNEL_ID = "@hashimali1986"
 def send_telegram_message(text):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     data = {"chat_id": CHANNEL_ID, "text": text}
-    requests.post(url, data=data)
+    try:
+        requests.post(url, data=data)
+    except Exception as e:
+        print(f"Telegram Error: {e}")
 
 assets = {
     "ذهب": {"symbol": "GC=F", "target": 20},
@@ -43,19 +46,25 @@ def fetch_data(symbol):
         headers = {"User-Agent": "Mozilla/5.0"}
         response = requests.get(url, headers=headers)
         data = response.json()
-        
-        if "chart" not in data or "error" in data["chart"] and data["chart"]["error"]:
+
+        if "chart" not in data or not data["chart"]["result"]:
             return None
 
         timestamps = data["chart"]["result"][0]["timestamp"]
-        prices = data["chart"]["result"][0]["indicators"]["quote"][0]
-        df = pd.DataFrame(prices)
+        quotes = data["chart"]["result"][0]["indicators"]["quote"][0]
+        df = pd.DataFrame(quotes)
         df["Date"] = pd.to_datetime(timestamps, unit="s")
         df.set_index("Date", inplace=True)
+        df.rename(columns={
+            "close": "Close",
+            "open": "Open",
+            "high": "High",
+            "low": "Low",
+            "volume": "Volume"
+        }, inplace=True)
         return df.dropna().tail(1000)
-
     except Exception as e:
-        print(f"fetch_data error: {e}")
+        send_telegram_message(f"خطأ أثناء جلب البيانات: {e}")
         return None
 
 def calculate_indicators(df):
@@ -71,40 +80,42 @@ def calculate_indicators(df):
     return df
 
 def check_signal(df, name, target):
-    last = df.iloc[-1]
-    prev = df.iloc[-2]
-    price = last["Close"]
-    signal = None
+    try:
+        last = df.iloc[-1]
+        prev = df.iloc[-2]
+        price = last["Close"]
+        signal = None
 
-    if prev["EMA9"] < prev["EMA21"] and last["EMA9"] > last["EMA21"] and last["RSI"] < 30:
-        signal = "buy"
-    elif prev["EMA9"] > prev["EMA21"] and last["EMA9"] < last["EMA21"] and last["RSI"] > 70:
-        signal = "sell"
+        if prev["EMA9"] < prev["EMA21"] and last["EMA9"] > last["EMA21"] and last["RSI"] < 30:
+            signal = "buy"
+        elif prev["EMA9"] > prev["EMA21"] and last["EMA9"] < last["EMA21"] and last["RSI"] > 70:
+            signal = "sell"
 
-    if signal:
-        entry = price
-        goal = entry + target if signal == "buy" else entry - target
-        active_trades[name] = {
-            "type": signal,
-            "entry": entry,
-            "target": goal
-        }
-        msg = (
-            f"#{name}\n"
-            f"إشارة: {signal.upper()}\n"
-            f"الدخول: {entry:.2f} → الهدف: {goal:.2f}\n"
-            f"RSI: {last['RSI']:.2f}, EMA9: {last['EMA9']:.2f}, EMA21: {last['EMA21']:.2f}\n"
-            f"الدعم: {last['Support']:.2f}, المقاومة: {last['Resistance']:.2f}\n"
-            f"الوقت: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
-        )
+        if signal:
+            entry = price
+            goal = entry + target if signal == "buy" else entry - target
+            active_trades[name] = {
+                "type": signal,
+                "entry": entry,
+                "target": goal
+            }
+            msg = (
+                f"#{name}\n"
+                f"إشارة: {signal.upper()}\n"
+                f"الدخول: {entry:.2f} → الهدف: {goal:.2f}\n"
+                f"RSI: {last['RSI']:.2f}, EMA9: {last['EMA9']:.2f}, EMA21: {last['EMA21']:.2f}\n"
+                f"الدعم: {last['Support']:.2f}, المقاومة: {last['Resistance']:.2f}\n"
+                f"الوقت: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+            )
+        else:
+            msg = (
+                f"#{name}\n"
+                f"لا توجد توصية: الشروط الفنية غير متحققة.\n"
+                f"الإغلاق: {price:.2f}, RSI: {last['RSI']:.2f}, EMA9: {last['EMA9']:.2f}, EMA21: {last['EMA21']:.2f}"
+            )
         send_telegram_message(msg)
-    else:
-        msg = (
-            f"#{name}\n"
-            f"لا توجد توصية: الشروط الفنية غير متحققة.\n"
-            f"الإغلاق: {price:.2f}, RSI: {last['RSI']:.2f}, EMA9: {last['EMA9']:.2f}, EMA21: {last['EMA21']:.2f}"
-        )
-        send_telegram_message(msg)
+    except Exception as e:
+        send_telegram_message(f"#{name} | خطأ أثناء تحليل البيانات: {e}")
 
 def monitor_trades():
     for name, trade in list(active_trades.items()):
