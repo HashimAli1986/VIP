@@ -18,8 +18,9 @@ def keep_alive():
     t = Thread(target=run)
     t.start()
 
-BOT_TOKEN = "توكن_البوت_هنا"
-CHANNEL_ID = "@اسم_القناة_هنا"
+# إعداد التوكن والقناة
+BOT_TOKEN = "7883771248:AAFfwmcF3hcHz17_IG0KfyOCSGLjMBzyg8E"
+CHANNEL_ID = "@hashimali1986"
 
 def send_telegram_message(text):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
@@ -132,5 +133,5 @@ def main_loop():
 
 if __name__ == "__main__":
     keep_alive()
-    send_telegram_message("تم تشغيل المحلل الذكي بنجاح.")
+    send_telegram_message("✅ تم تشغيل المحلل الذكي بنجاح وجاهز لإرسال التوصيات.")
     main_loop()
