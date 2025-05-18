@@ -37,18 +37,53 @@ assets = {
 active_trades = {}
 last_summary_time = time.time()
 
-def fetch_data(symbol):
+def fetch_data(symbol, name=""):
     url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=60d&interval=1h"
     try:
         response = requests.get(url)
         data = response.json()
-        timestamps = data["chart"]["result"][0]["timestamp"]
-        prices = data["chart"]["result"][0]["indicators"]["quote"][0]
-        df = pd.DataFrame(prices)
+
+        # تأكد من وجود كل المسارات الضرورية في JSON
+        if (
+            not data.get("chart")
+            or not data["chart"].get("result")
+            or not data["chart"]["result"][0].get("timestamp")
+            or not data["chart"]["result"][0].get("indicators")
+            or not data["chart"]["result"][0]["indicators"].get("quote")
+        ):
+            send_telegram_message(f"#{name} | ❌ البيانات غير مكتملة من Yahoo.")
+            return None
+
+        result = data["chart"]["result"][0]
+        quote = result["indicators"]["quote"][0]
+        timestamps = result["timestamp"]
+
+        # تأكد من وجود الأعمدة المطلوبة
+        if not all(k in quote for k in ["close", "open", "high", "low"]):
+            send_telegram_message(f"#{name} | ❌ أعمدة ناقصة في البيانات.")
+            return None
+
+        df = pd.DataFrame({
+            "Close": quote["close"],
+            "Open": quote["open"],
+            "High": quote["high"],
+            "Low": quote["low"]
+        })
+
         df["Date"] = pd.to_datetime(timestamps, unit="s")
         df.set_index("Date", inplace=True)
+
+        # حذف الصفوف التي فيها قيم مفقودة (NaN)
+        df.dropna(inplace=True)
+
+        if df.empty:
+            send_telegram_message(f"#{name} | ❌ البيانات بعد التنظيف فارغة.")
+            return None
+
         return df.tail(1000)
-    except:
+
+    except Exception as e:
+        send_telegram_message(f"#{name} | ❌ حدث خطأ أثناء جلب البيانات:\n{str(e)}")
         return None
 
 def calculate_indicators(df):
