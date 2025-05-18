@@ -38,17 +38,24 @@ active_trades = {}
 last_summary_time = time.time()
 
 def fetch_data(symbol):
-    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=60d&interval=1h"
     try:
-        response = requests.get(url)
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=10d&interval=1h"
+        headers = {"User-Agent": "Mozilla/5.0"}
+        response = requests.get(url, headers=headers)
         data = response.json()
+        
+        if "chart" not in data or "error" in data["chart"] and data["chart"]["error"]:
+            return None
+
         timestamps = data["chart"]["result"][0]["timestamp"]
         prices = data["chart"]["result"][0]["indicators"]["quote"][0]
         df = pd.DataFrame(prices)
         df["Date"] = pd.to_datetime(timestamps, unit="s")
         df.set_index("Date", inplace=True)
-        return df.tail(1000)
-    except:
+        return df.dropna().tail(1000)
+
+    except Exception as e:
+        print(f"fetch_data error: {e}")
         return None
 
 def calculate_indicators(df):
