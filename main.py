@@ -42,13 +42,48 @@ def fetch_data(symbol):
     try:
         response = requests.get(url)
         data = response.json()
+
+        # التحقق من وجود النتائج
+        if not data.get("chart") or not data["chart"].get("result"):
+            print(f"{symbol} | لا يوجد نتائج في البيانات.")
+            return None
+
+        result = data["chart"]["result"][0]
+        timestamps = result.get("timestamp")
+        indicators = result.get("indicators", {})
+        quote = indicators.get("quote", [{}])[0]
+
+        # التحقق من توفر الأعمدة
+        required_keys = ["open", "high", "low", "close"]
+        for key in required_keys:
+            if key not in quote:
+                print(f"{symbol} | البيانات ناقصة: {key} غير موجود.")
+                return None
+
+        df = pd.DataFrame({
+            "Open": quote["open"],
+            "High": quote["high"],
+            "Low": quote["low"],
+            "Close": quote["close"]
+        })
+
+        df["Date"] = pd.to_datetime(timestamps, unit="s")
+        df.set_index("Date", inplace=True)
+        return df.tail(1000)
+
+    except Exception as e:
+        print(f"{symbol} | خطأ أثناء جلب البيانات: {e}")
+        return None
+
         timestamps = data["chart"]["result"][0]["timestamp"]
         prices = data["chart"]["result"][0]["indicators"]["quote"][0]
         df = pd.DataFrame(prices)
         df["Date"] = pd.to_datetime(timestamps, unit="s")
         df.set_index("Date", inplace=True)
-        return df.tail(1000)
-    except:
+        return df.dropna().tail(1000)
+
+    except Exception as e:
+        print(f"fetch_data error: {e}")
         return None
 
 def calculate_indicators(df):
