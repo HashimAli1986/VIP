@@ -39,8 +39,11 @@ last_summary_time = time.time()
 
 def fetch_data(symbol):
     url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=60d&interval=1h"
+    headers = {
+        "User-Agent": "Mozilla/5.0"
+    }
     try:
-        response = requests.get(url)
+        response = requests.get(url, headers=headers)
         data = response.json()
         timestamps = data["chart"]["result"][0]["timestamp"]
         prices = data["chart"]["result"][0]["indicators"]["quote"][0]
@@ -48,7 +51,8 @@ def fetch_data(symbol):
         df["Date"] = pd.to_datetime(timestamps, unit="s")
         df.set_index("Date", inplace=True)
         return df.tail(1000)
-    except:
+    except Exception as e:
+        print("fetch error:", e)
         return None
 
 def calculate_indicators(df):
