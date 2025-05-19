@@ -47,12 +47,21 @@ def fetch_data(symbol):
         headers = {"User-Agent": "Mozilla/5.0"}
         response = requests.get(url, headers=headers)
         data = response.json()
-        timestamps = data["chart"]["result"][0]["timestamp"]
-        prices = data["chart"]["result"][0]["indicators"]["quote"][0]
+        result = data["chart"]["result"][0]
+        timestamps = result["timestamp"]
+        prices = result["indicators"]["quote"][0]
+        
+        # تحقق من وجود الأعمدة المهمة
+        required_keys = ["Open", "High", "Low", "Close"]
+        if not all(key in prices for key in required_keys):
+            print(f"Missing required keys in data for {symbol}")
+            return None
+
         df = pd.DataFrame(prices)
         df["Date"] = pd.to_datetime(timestamps, unit="s")
         df.set_index("Date", inplace=True)
         return df.dropna().tail(1000)
+
     except Exception as e:
         print(f"fetch_data error: {e}")
         return None
