@@ -62,17 +62,17 @@ def analyze_next_hour_direction(df):
     prev = df.iloc[-2]
     direction = "صاعدة" if last["Close"] > last["Open"] else "هابطة"
 
-    ema9_prev = float(prev["EMA9"])
-    ema21_prev = float(prev["EMA21"])
-    ema9_last = float(last["EMA9"])
-    ema21_last = float(last["EMA21"])
-    rsi_value = float(last["RSI"])
-    support = float(last["Support"])
-    resistance = float(last["Resistance"])
+    ema9_prev = prev["EMA9"].item() if hasattr(prev["EMA9"], "item") else prev["EMA9"]
+    ema21_prev = prev["EMA21"].item() if hasattr(prev["EMA21"], "item") else prev["EMA21"]
+    ema9_last = last["EMA9"].item() if hasattr(last["EMA9"], "item") else last["EMA9"]
+    ema21_last = last["EMA21"].item() if hasattr(last["EMA21"], "item") else last["EMA21"]
+    rsi_value = last["RSI"].item() if hasattr(last["RSI"], "item") else last["RSI"]
+    support = last["Support"].item() if hasattr(last["Support"], "item") else last["Support"]
+    resistance = last["Resistance"].item() if hasattr(last["Resistance"], "item") else last["Resistance"]
 
     ema_cross = "صعود" if ema9_prev < ema21_prev and ema9_last > ema21_last else "هبوط" if ema9_prev > ema21_prev and ema9_last < ema21_last else "جانبي"
     rsi_zone = "تشبع بيع" if rsi_value < 30 else "تشبع شراء" if rsi_value > 70 else "محايد"
-    
+
     summary = (
         f"الاتجاه المتوقع: {direction}\n"
         f"تقاطع EMA: {ema_cross}\n"
