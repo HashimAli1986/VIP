@@ -69,14 +69,19 @@ def analyze_next_hour_direction(df):
     prev = df.iloc[-2]
     direction = "صاعدة" if last["Close"] > last["Open"] else "هابطة"
 
-    # إشارات إضافية:
-    ema_cross = "صعود" if prev["EMA9"] < prev["EMA21"] and last["EMA9"] > last["EMA21"] else "هبوط" if prev["EMA9"] > prev["EMA21"] and last["EMA9"] < last["EMA21"] else "جانبي"
-    rsi_zone = "تشبع بيع" if last["RSI"] < 30 else "تشبع شراء" if last["RSI"] > 70 else "محايد"
+    ema9_prev = float(prev["EMA9"])
+    ema21_prev = float(prev["EMA21"])
+    ema9_last = float(last["EMA9"])
+    ema21_last = float(last["EMA21"])
+    rsi_value = float(last["RSI"])
+
+    ema_cross = "صعود" if ema9_prev < ema21_prev and ema9_last > ema21_last else "هبوط" if ema9_prev > ema21_prev and ema9_last < ema21_last else "جانبي"
+    rsi_zone = "تشبع بيع" if rsi_value < 30 else "تشبع شراء" if rsi_value > 70 else "محايد"
     
     summary = (
         f"الاتجاه المتوقع: {direction}\n"
         f"تقاطع EMA: {ema_cross}\n"
-        f"RSI: {last['RSI']:.2f} ({rsi_zone})\n"
+        f"RSI: {rsi_value:.2f} ({rsi_zone})\n"
         f"الدعم: {last['Support']:.2f} | المقاومة: {last['Resistance']:.2f}"
     )
     return last["Close"], summary
