@@ -1,4 +1,5 @@
-flask
-pandas
-requests
-yfinance
+pip install yfinance  
+pip install pandas  
+pip install telebot  
+pip install ta  
+pip install ccxt
