@@ -3,3 +3,4 @@ pandas
 telebot  
 ta  
 ccxt
+numpy
