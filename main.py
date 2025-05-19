@@ -71,11 +71,9 @@ def analyze_next_hour_direction(df):
     last = df.iloc[-1]
     prev = df.iloc[-2]
     direction = "صاعدة" if last["Close"] > last["Open"] else "هابطة"
-
-    # إشارات إضافية:
     ema_cross = "صعود" if prev["EMA9"] < prev["EMA21"] and last["EMA9"] > last["EMA21"] else "هبوط" if prev["EMA9"] > prev["EMA21"] and last["EMA9"] < last["EMA21"] else "جانبي"
     rsi_zone = "تشبع بيع" if last["RSI"] < 30 else "تشبع شراء" if last["RSI"] > 70 else "محايد"
-    
+
     summary = (
         f"الاتجاه المتوقع: {direction}\n"
         f"تقاطع EMA: {ema_cross}\n"
@@ -91,16 +89,20 @@ def hourly_price_update():
         if now.hour != last_sent_hour and now.minute >= 0:
             last_sent_hour = now.hour
             try:
-                print(f"تشغيل التحديث الساعة {now.strftime('%H:%M')} UTC")  # تتبع داخلي
+                print(f"تشغيل التحديث الساعة {now.strftime('%H:%M')} UTC")
                 msg = f"تحديث الساعة {now.strftime('%H:%M')} UTC\n"
                 for name, info in assets.items():
                     df = fetch_daily_data(info["symbol"])
-                    if df is not None and len(df) >= 1000:
+                    if df is None:
+                        msg += f"\n{name}: البيانات غير متوفرة (فشل جلب البيانات من المصدر).\n"
+                    elif df.empty:
+                        msg += f"\n{name}: البيانات غير متوفرة (البيانات فاضية).\n"
+                    elif len(df) < 1000:
+                        msg += f"\n{name}: البيانات غير كافية (< 1000 شمعة).\n"
+                    else:
                         df = calculate_indicators(df)
                         price, direction_info = analyze_next_hour_direction(df)
                         msg += f"\n{name}:\nالسعر الحالي: {price:.2f}\n{direction_info}\n"
-                    else:
-                        msg += f"\n{name}: البيانات غير متوفرة.\n"
                 send_telegram_message(msg)
             except Exception as e:
                 error_msg = f"Error in hourly update: {e}"
