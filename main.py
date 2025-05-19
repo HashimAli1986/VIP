@@ -44,13 +44,6 @@ def fetch_daily_data(symbol):
     except Exception as e:
         print(f"fetch_data error: {e}")
         return None
-        df = pd.DataFrame(prices)
-        df["Date"] = pd.to_datetime(timestamps, unit="s")
-        df.set_index("Date", inplace=True)
-        return df.dropna().tail(1000)
-    except Exception as e:
-        print(f"fetch_data error: {e}")
-        return None
 
 def calculate_indicators(df):
     df["EMA9"] = df["Close"].ewm(span=9).mean()
@@ -74,6 +67,8 @@ def analyze_next_hour_direction(df):
     ema9_last = float(last["EMA9"])
     ema21_last = float(last["EMA21"])
     rsi_value = float(last["RSI"])
+    support = float(last["Support"])
+    resistance = float(last["Resistance"])
 
     ema_cross = "صعود" if ema9_prev < ema21_prev and ema9_last > ema21_last else "هبوط" if ema9_prev > ema21_prev and ema9_last < ema21_last else "جانبي"
     rsi_zone = "تشبع بيع" if rsi_value < 30 else "تشبع شراء" if rsi_value > 70 else "محايد"
@@ -82,9 +77,9 @@ def analyze_next_hour_direction(df):
         f"الاتجاه المتوقع: {direction}\n"
         f"تقاطع EMA: {ema_cross}\n"
         f"RSI: {rsi_value:.2f} ({rsi_zone})\n"
-        f"الدعم: {last['Support']:.2f} | المقاومة: {last['Resistance']:.2f}"
+        f"الدعم: {support:.2f} | المقاومة: {resistance:.2f}"
     )
-    return last["Close"], summary
+    return float(last["Close"]), summary
 
 def hourly_price_update():
     last_sent_hour = -1
@@ -93,7 +88,7 @@ def hourly_price_update():
         if now.hour != last_sent_hour and now.minute >= 0:
             last_sent_hour = now.hour
             try:
-                print(f"تشغيل التحديث الساعة {now.strftime('%H:%M')} UTC")  # تتبع داخلي
+                print(f"تشغيل التحديث الساعة {now.strftime('%H:%M')} UTC")
                 msg = f"تحديث الساعة {now.strftime('%H:%M')} UTC\n"
                 for name, info in assets.items():
                     df = fetch_daily_data(info["symbol"])
