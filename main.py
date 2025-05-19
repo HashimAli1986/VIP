@@ -85,20 +85,28 @@ def analyze_next_hour_direction(df):
     return last["Close"], summary
 
 def hourly_price_update():
+    last_sent_hour = -1
     while True:
         now = datetime.utcnow()
-        if now.minute == 0:
-            msg = f"تحديث الساعة {now.strftime('%H:%M')} UTC\n"
-            for name, info in assets.items():
-                df = fetch_daily_data(info["symbol"])
-                if df is not None and len(df) >= 1000:
-                    df = calculate_indicators(df)
-                    price, direction_info = analyze_next_hour_direction(df)
-                    msg += f"\n{name}:\nالسعر الحالي: {price:.2f}\n{direction_info}\n"
-                else:
-                    msg += f"\n{name}: البيانات غير متوفرة.\n"
-            send_telegram_message(msg)
-        time.sleep(60)
+        if now.hour != last_sent_hour and now.minute >= 0:
+            last_sent_hour = now.hour
+            try:
+                print(f"تشغيل التحديث الساعة {now.strftime('%H:%M')} UTC")  # تتبع داخلي
+                msg = f"تحديث الساعة {now.strftime('%H:%M')} UTC\n"
+                for name, info in assets.items():
+                    df = fetch_daily_data(info["symbol"])
+                    if df is not None and len(df) >= 1000:
+                        df = calculate_indicators(df)
+                        price, direction_info = analyze_next_hour_direction(df)
+                        msg += f"\n{name}:\nالسعر الحالي: {price:.2f}\n{direction_info}\n"
+                    else:
+                        msg += f"\n{name}: البيانات غير متوفرة.\n"
+                send_telegram_message(msg)
+            except Exception as e:
+                error_msg = f"Error in hourly update: {e}"
+                print(error_msg)
+                send_telegram_message(f"تنبيه: {error_msg}")
+        time.sleep(30)
 
 if __name__ == "__main__":
     keep_alive()
