@@ -36,12 +36,21 @@ assets = {
     "NDX": {"symbol": "^NDX"}
 }
 
-import yfinance as yf
-
 def fetch_daily_data(symbol):
     try:
-        df = yf.download(symbol, period="3y", interval="1d", progress=False)
-        return df.tail(1000)
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=3y&interval=1d"
+        headers = {"User-Agent": "Mozilla/5.0"}
+        response = requests.get(url, headers=headers)
+        data = response.json()
+        result = data["chart"]["result"][0]
+        timestamps = result["timestamp"]
+        prices = result["indicators"]["quote"][0]
+        if not all(k in prices for k in ["Open", "High", "Low", "Close"]):
+            return None
+        df = pd.DataFrame(prices)
+        df["Date"] = pd.to_datetime(timestamps, unit="s")
+        df.set_index("Date", inplace=True)
+        return df.dropna().tail(1000)
     except Exception as e:
         print(f"fetch_data error: {e}")
         return None
@@ -76,28 +85,20 @@ def analyze_next_hour_direction(df):
     return last["Close"], summary
 
 def hourly_price_update():
-    last_sent_hour = -1
     while True:
         now = datetime.utcnow()
-        if now.hour != last_sent_hour and now.minute >= 0:
-            last_sent_hour = now.hour
-            try:
-                print(f"تشغيل التحديث الساعة {now.strftime('%H:%M')} UTC")  # تتبع داخلي
-                msg = f"تحديث الساعة {now.strftime('%H:%M')} UTC\n"
-                for name, info in assets.items():
-                    df = fetch_daily_data(info["symbol"])
-                    if df is not None and len(df) >= 1000:
-                        df = calculate_indicators(df)
-                        price, direction_info = analyze_next_hour_direction(df)
-                        msg += f"\n{name}:\nالسعر الحالي: {price:.2f}\n{direction_info}\n"
-                    else:
-                        msg += f"\n{name}: البيانات غير متوفرة.\n"
-                send_telegram_message(msg)
-            except Exception as e:
-                error_msg = f"Error in hourly update: {e}"
-                print(error_msg)
-                send_telegram_message(f"تنبيه: {error_msg}")
-        time.sleep(30)
+        if now.minute == 0:
+            msg = f"تحديث الساعة {now.strftime('%H:%M')} UTC\n"
+            for name, info in assets.items():
+                df = fetch_daily_data(info["symbol"])
+                if df is not None and len(df) >= 1000:
+                    df = calculate_indicators(df)
+                    price, direction_info = analyze_next_hour_direction(df)
+                    msg += f"\n{name}:\nالسعر الحالي: {price:.2f}\n{direction_info}\n"
+                else:
+                    msg += f"\n{name}: البيانات غير متوفرة.\n"
+            send_telegram_message(msg)
+        time.sleep(60)
 
 if __name__ == "__main__":
     keep_alive()
