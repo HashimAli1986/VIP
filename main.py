@@ -4,7 +4,6 @@ import time
 from datetime import datetime
 from flask import Flask
 from threading import Thread
-import yfinance as yf
 
 app = Flask('')
 
@@ -39,8 +38,19 @@ assets = {
 
 def fetch_daily_data(symbol):
     try:
-        df = yf.download(symbol, period="3y", interval="1d", progress=False)
-        return df.tail(1000)
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=3y&interval=1d"
+        headers = {"User-Agent": "Mozilla/5.0"}
+        response = requests.get(url, headers=headers)
+        data = response.json()
+        result = data["chart"]["result"][0]
+        timestamps = result["timestamp"]
+        prices = result["indicators"]["quote"][0]
+        if not all(k in prices for k in ["Open", "High", "Low", "Close"]):
+            return None
+        df = pd.DataFrame(prices)
+        df["Date"] = pd.to_datetime(timestamps, unit="s")
+        df.set_index("Date", inplace=True)
+        return df.dropna().tail(1000)
     except Exception as e:
         print(f"fetch_data error: {e}")
         return None
@@ -62,48 +72,33 @@ def analyze_next_hour_direction(df):
     prev = df.iloc[-2]
     direction = "صاعدة" if last["Close"] > last["Open"] else "هابطة"
 
-    ema9_prev = prev["EMA9"].item() if hasattr(prev["EMA9"], "item") else prev["EMA9"]
-    ema21_prev = prev["EMA21"].item() if hasattr(prev["EMA21"], "item") else prev["EMA21"]
-    ema9_last = last["EMA9"].item() if hasattr(last["EMA9"], "item") else last["EMA9"]
-    ema21_last = last["EMA21"].item() if hasattr(last["EMA21"], "item") else last["EMA21"]
-    rsi_value = last["RSI"].item() if hasattr(last["RSI"], "item") else last["RSI"]
-    support = last["Support"].item() if hasattr(last["Support"], "item") else last["Support"]
-    resistance = last["Resistance"].item() if hasattr(last["Resistance"], "item") else last["Resistance"]
-
-    ema_cross = "صعود" if ema9_prev < ema21_prev and ema9_last > ema21_last else "هبوط" if ema9_prev > ema21_prev and ema9_last < ema21_last else "جانبي"
-    rsi_zone = "تشبع بيع" if rsi_value < 30 else "تشبع شراء" if rsi_value > 70 else "محايد"
-
+    # إشارات إضافية:
+    ema_cross = "صعود" if prev["EMA9"] < prev["EMA21"] and last["EMA9"] > last["EMA21"] else "هبوط" if prev["EMA9"] > prev["EMA21"] and last["EMA9"] < last["EMA21"] else "جانبي"
+    rsi_zone = "تشبع بيع" if last["RSI"] < 30 else "تشبع شراء" if last["RSI"] > 70 else "محايد"
+    
     summary = (
         f"الاتجاه المتوقع: {direction}\n"
         f"تقاطع EMA: {ema_cross}\n"
-        f"RSI: {rsi_value:.2f} ({rsi_zone})\n"
-        f"الدعم: {support:.2f} | المقاومة: {resistance:.2f}"
+        f"RSI: {last['RSI']:.2f} ({rsi_zone})\n"
+        f"الدعم: {last['Support']:.2f} | المقاومة: {last['Resistance']:.2f}"
     )
-    return float(last["Close"]), summary
+    return last["Close"], summary
 
 def hourly_price_update():
-    last_sent_hour = -1
     while True:
         now = datetime.utcnow()
-        if now.hour != last_sent_hour and now.minute >= 0:
-            last_sent_hour = now.hour
-            try:
-                print(f"تشغيل التحديث الساعة {now.strftime('%H:%M')} UTC")
-                msg = f"تحديث الساعة {now.strftime('%H:%M')} UTC\n"
-                for name, info in assets.items():
-                    df = fetch_daily_data(info["symbol"])
-                    if df is not None and len(df) >= 1000:
-                        df = calculate_indicators(df)
-                        price, direction_info = analyze_next_hour_direction(df)
-                        msg += f"\n{name}:\nالسعر الحالي: {price:.2f}\n{direction_info}\n"
-                    else:
-                        msg += f"\n{name}: البيانات غير متوفرة.\n"
-                send_telegram_message(msg)
-            except Exception as e:
-                error_msg = f"Error in hourly update: {e}"
-                print(error_msg)
-                send_telegram_message(f"تنبيه: {error_msg}")
-        time.sleep(30)
+        if now.minute == 0:
+            msg = f"تحديث الساعة {now.strftime('%H:%M')} UTC\n"
+            for name, info in assets.items():
+                df = fetch_daily_data(info["symbol"])
+                if df is not None and len(df) >= 1000:
+                    df = calculate_indicators(df)
+                    price, direction_info = analyze_next_hour_direction(df)
+                    msg += f"\n{name}:\nالسعر الحالي: {price:.2f}\n{direction_info}\n"
+                else:
+                    msg += f"\n{name}: البيانات غير متوفرة.\n"
+            send_telegram_message(msg)
+        time.sleep(60)
 
 if __name__ == "__main__":
     keep_alive()
