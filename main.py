@@ -4,7 +4,6 @@ import time
 from datetime import datetime
 from flask import Flask
 from threading import Thread
-import yfinance as yf
 
 app = Flask('')
 
@@ -39,13 +38,15 @@ assets = {
 
 def fetch_daily_data(symbol):
     try:
-        df = yf.download(symbol, period="3y", interval="1d", progress=False)
-        if df is None or df.empty:
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=3y&interval=1d"
+        headers = {"User-Agent": "Mozilla/5.0"}
+        response = requests.get(url, headers=headers)
+        data = response.json()
+        result = data["chart"]["result"][0]
+        timestamps = result["timestamp"]
+        prices = result["indicators"]["quote"][0]
+        if not all(k in prices for k in ["Open", "High", "Low", "Close"]):
             return None
-        return df.tail(1000)
-    except Exception as e:
-        print(f"fetch_data error: {e}")
-        return None
         df = pd.DataFrame(prices)
         df["Date"] = pd.to_datetime(timestamps, unit="s")
         df.set_index("Date", inplace=True)
