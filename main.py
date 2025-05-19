@@ -18,7 +18,7 @@ def keep_alive():
     t = Thread(target=run)
     t.start()
 
-# التوكن والقناة الحقيقية
+# إعداد التوكن والقناة
 BOT_TOKEN = "7883771248:AAFfwmcF3hcHz17_IG0KfyOCSGLjMBzyg8E"
 CHANNEL_ID = "@hashimali1986"
 
@@ -28,7 +28,7 @@ def send_telegram_message(text):
     try:
         requests.post(url, data=data)
     except Exception as e:
-        print(f"خطأ في إرسال الرسالة: {e}")
+        print(f"Telegram Error: {e}")
 
 assets = {
     "ذهب": {"symbol": "GC=F", "target": 20},
@@ -38,28 +38,40 @@ assets = {
 }
 
 active_trades = {}
+trade_start_times = {}
 last_summary_time = time.time()
 
 def fetch_data(symbol):
     try:
-        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=10d&interval=1h"
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=180d&interval=4h"
         headers = {"User-Agent": "Mozilla/5.0"}
         response = requests.get(url, headers=headers)
         data = response.json()
-
-        if "chart" not in data or "error" in data["chart"] and data["chart"]["error"]:
-            return None
-
         timestamps = data["chart"]["result"][0]["timestamp"]
         prices = data["chart"]["result"][0]["indicators"]["quote"][0]
         df = pd.DataFrame(prices)
         df["Date"] = pd.to_datetime(timestamps, unit="s")
         df.set_index("Date", inplace=True)
         return df.dropna().tail(1000)
-
     except Exception as e:
-        print(f"fetch_data error for {symbol}: {e}")
+        print(f"fetch_data error: {e}")
         return None
+
+def get_upcoming_news():
+    try:
+        url = "https://site.api.efxdata.com/calendar?days=1"
+        headers = {"User-Agent": "Mozilla/5.0"}
+        r = requests.get(url, headers=headers)
+        if r.status_code == 200:
+            news = r.json()
+            now = datetime.utcnow()
+            for item in news.get("data", []):
+                event_time = datetime.strptime(item["datetime"], "%Y-%m-%dT%H:%M:%SZ")
+                if 0 <= (event_time - now).total_seconds() <= 3600 and item["impact"] in ["High", "Medium"]:
+                    return f"تنبيه: خبر اقتصادي قريب - {item['title']} الساعة {event_time.strftime('%H:%M')} UTC"
+        return ""
+    except:
+        return ""
 
 def calculate_indicators(df):
     df["EMA9"] = df["Close"].ewm(span=9).mean()
@@ -73,84 +85,82 @@ def calculate_indicators(df):
     df["Resistance"] = df["High"].rolling(50).max()
     return df
 
+def analyze_candle(df):
+    last = df.iloc[-1]
+    return "صاعدة" if last["Close"] > last["Open"] else "هابطة"
+
 def check_signal(df, name, target):
-    try:
-        last = df.iloc[-1]
-        prev = df.iloc[-2]
-        price = last["Close"]
-        signal = None
+    last = df.iloc[-1]
+    prev = df.iloc[-2]
+    price = last["Close"]
+    candle_type = analyze_candle(df)
+    signal = "buy" if candle_type == "صاعدة" else "sell"
+    strength = "قوية" if (
+        (signal == "buy" and prev["EMA9"] < prev["EMA21"] and last["EMA9"] > last["EMA21"] and last["RSI"] < 35)
+        or
+        (signal == "sell" and prev["EMA9"] > prev["EMA21"] and last["EMA9"] < last["EMA21"] and last["RSI"] > 65)
+    ) else "ضعيفة – للمراقبة فقط"
 
-        if prev["EMA9"] < prev["EMA21"] and last["EMA9"] > last["EMA21"] and last["RSI"] < 30:
-            signal = "buy"
-        elif prev["EMA9"] > prev["EMA21"] and last["EMA9"] < last["EMA21"] and last["RSI"] > 70:
-            signal = "sell"
+    entry = price
+    goal = entry + target if signal == "buy" else entry - target
+    active_trades[name] = {"type": signal, "entry": entry, "target": goal}
+    trade_start_times[name] = datetime.now()
 
-        if signal:
-            entry = price
-            goal = entry + target if signal == "buy" else entry - target
-            active_trades[name] = {"type": signal, "entry": entry, "target": goal}
-            msg = (
-                f"#{name}\n"
-                f"إشارة: {signal.upper()}\n"
-                f"الدخول: {entry:.2f} → الهدف: {goal:.2f}\n"
-                f"RSI: {last['RSI']:.2f}, EMA9: {last['EMA9']:.2f}, EMA21: {last['EMA21']:.2f}\n"
-                f"الدعم: {last['Support']:.2f}, المقاومة: {last['Resistance']:.2f}\n"
-                f"الوقت: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
-            )
-        else:
-            msg = (
-                f"#{name}\n"
-                f"لا توجد توصية: الشروط الفنية غير متحققة.\n"
-                f"الإغلاق: {price:.2f}, RSI: {last['RSI']:.2f}, EMA9: {last['EMA9']:.2f}, EMA21: {last['EMA21']:.2f}"
-            )
-        send_telegram_message(msg)
-
-    except Exception as e:
-        print(f"check_signal error for {name}: {e}")
-        send_telegram_message(f"#{name} | تعذر تحليل البيانات.")
+    news_alert = get_upcoming_news()
+    msg = (
+        f"#{name}\n"
+        f"نوع الشمعة: {candle_type}\n"
+        f"إشارة: {signal.upper()} ({strength})\n"
+        f"الدخول: {entry:.2f} → الهدف: {goal:.2f}\n"
+        f"RSI: {last['RSI']:.2f}, EMA9: {last['EMA9']:.2f}, EMA21: {last['EMA21']:.2f}\n"
+        f"الدعم: {last['Support']:.2f}, المقاومة: {last['Resistance']:.2f}\n"
+        f"الوقت: {datetime.utcnow().strftime('%Y-%m-%d %H:%M')} UTC\n"
+        f"{news_alert}"
+    )
+    send_telegram_message(msg)
 
 def monitor_trades():
-    for name, trade in list(active_trades.items()):
-        try:
-            df = fetch_data(assets[name]["symbol"])
-            if df is not None:
-                current_price = df["Close"].iloc[-1]
-                if trade["type"] == "buy" and current_price >= trade["target"]:
-                    send_telegram_message(f"#{name} تحقق الهدف: BUY عند {trade['target']:.2f}")
-                    del active_trades[name]
-                elif trade["type"] == "sell" and current_price <= trade["target"]:
-                    send_telegram_message(f"#{name} تحقق الهدف: SELL عند {trade['target']:.2f}")
-                    del active_trades[name]
-        except Exception as e:
-            print(f"monitor_trades error for {name}: {e}")
+    for name in list(active_trades.keys()):
+        df = fetch_data(assets[name]["symbol"])
+        if df is None:
+            continue
+        current_price = df["Close"].iloc[-1]
+        trade = active_trades[name]
+        if (trade["type"] == "buy" and current_price >= trade["target"]) or (
+            trade["type"] == "sell" and current_price <= trade["target"]):
+            send_telegram_message(f"#{name} تحقق الهدف: {trade['type'].upper()} عند {trade['target']:.2f}")
+            del active_trades[name]
+            del trade_start_times[name]
+        else:
+            elapsed = datetime.utcnow() - trade_start_times[name]
+            if elapsed.total_seconds() >= 4 * 3600:
+                send_telegram_message(f"#{name} | تم إغلاق الصفقة بعد 4 ساعات دون تحقيق الهدف.")
+                del active_trades[name]
+                del trade_start_times[name]
 
 def summarize():
     global last_summary_time
-    try:
-        if time.time() - last_summary_time >= 86400:
-            summary = f"ملخص يومي: تم تنفيذ {len(active_trades)} توصيات نشطة اليوم."
-            send_telegram_message(summary)
-            last_summary_time = time.time()
-    except Exception as e:
-        print(f"summarize error: {e}")
+    if time.time() - last_summary_time >= 86400:
+        summary = f"ملخص يومي: عدد التوصيات الحالية: {len(active_trades)}"
+        send_telegram_message(summary)
+        last_summary_time = time.time()
 
 def main_loop():
+    last_checked_hour = -1
     while True:
-        for name, info in assets.items():
-            try:
+        now = datetime.utcnow()
+        if now.hour % 4 == 0 and now.hour != last_checked_hour:
+            last_checked_hour = now.hour
+            for name, info in assets.items():
                 df = fetch_data(info["symbol"])
-                if df is None or df.empty:
-                    send_telegram_message(f"#{name} | تعذر جلب البيانات.")
-                    continue
-                df = calculate_indicators(df)
-                check_signal(df, name, info["target"])
-            except Exception as e:
-                print(f"main_loop error on {name}: {e}")
+                if df is not None and not df.empty:
+                    df = calculate_indicators(df)
+                    check_signal(df, name, info["target"])
         monitor_trades()
         summarize()
-        time.sleep(3600)
+        time.sleep(900)
 
 if __name__ == "__main__":
     keep_alive()
-    send_telegram_message("✅ تم تشغيل المحلل الذكي بنجاح وجاهز لإرسال التوصيات كل ساعة.")
+    send_telegram_message("✅ تم تشغيل المحلل الذكي VIP بنجاح مع ربط الأخبار الاقتصادية.")
     main_loop()
