@@ -9,8 +9,8 @@ from ta.volatility import BollingerBands
 import ccxt  # للتكامل مع منصات التداول (اختياري)
 
 # ------------------- إعدادات التليجرام ------------------- #
-BOT_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"
-CHANNEL_ID = "YOUR_CHANNEL_ID"
+BOT_TOKEN = "7883771248:AAFfwmcF3hcHz17_IG0KfyOCSGLjMBzyg8E"
+CHANNEL_ID = "@hashimali1986"
 bot = telebot.TeleBot(BOT_TOKEN)
 
 # ------------------- إعدادات الأصول ------------------- #
