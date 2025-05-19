@@ -25,8 +25,7 @@ def send_telegram_message(text):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     data = {"chat_id": CHANNEL_ID, "text": text}
     try:
-        response = requests.post(url, data=data)
-        response.raise_for_status()
+        requests.post(url, data=data)
     except Exception as e:
         print(f"Telegram Error: {e}")
 
@@ -39,85 +38,86 @@ assets = {
 
 def fetch_daily_data(symbol):
     try:
-        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=3y&interval=1d&redirect=false"
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-        }
-        response = requests.get(url, headers=headers, timeout=10)
-        if response.status_code != 200:
-            print(f"HTTP Error {response.status_code} for {symbol}")
-            return None
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=3y&interval=1d"
+        headers = {"User-Agent": "Mozilla/5.0"}
+        response = requests.get(url, headers=headers)
         data = response.json()
-        if not data["chart"]["result"]:
-            print(f"No data found for {symbol}")
-            return None
         result = data["chart"]["result"][0]
         timestamps = result["timestamp"]
         prices = result["indicators"]["quote"][0]
-        if not all(key in prices for key in ["open", "high", "low", "close"]):
-            print(f"Missing price data for {symbol}")
+        
+        # التعديل هنا: استخدام مفاتيح بأحرف صغيرة
+        if not all(k in prices for k in ["open", "high", "low", "close"]):
             return None
-        df = pd.DataFrame(prices)
+            
+        df = pd.DataFrame({
+            "Open": prices["open"],
+            "High": prices["high"],
+            "Low": prices["low"],
+            "Close": prices["close"]
+        })
+        
         df["Date"] = pd.to_datetime(timestamps, unit="s")
         df.set_index("Date", inplace=True)
         return df.dropna().tail(1000)
     except Exception as e:
-        print(f"fetch_daily_data error ({symbol}): {e}")
+        print(f"fetch_data error: {e}")
         return None
 
 def calculate_indicators(df):
-    df["EMA9"] = df["close"].ewm(span=9).mean()
-    df["EMA21"] = df["close"].ewm(span=21).mean()
-    delta = df["close"].diff()
+    df["EMA9"] = df["Close"].ewm(span=9).mean()
+    df["EMA21"] = df["Close"].ewm(span=21).mean()
+    delta = df["Close"].diff()
     gain = delta.where(delta > 0, 0).rolling(14).mean()
-    loss = (-delta).where(delta < 0, 0).rolling(14).mean()
+    loss = -delta.where(delta < 0, 0).rolling(14).mean()
     rs = gain / loss
     df["RSI"] = 100 - (100 / (1 + rs))
-    df["Support"] = df["low"].rolling(50).min()
-    df["Resistance"] = df["high"].rolling(50).max()
+    df["Support"] = df["Low"].rolling(50).min()
+    df["Resistance"] = df["High"].rolling(50).max()
     return df
 
 def analyze_next_hour_direction(df):
     last = df.iloc[-1]
     prev = df.iloc[-2]
-    direction = "صاعدة" if last["close"] > last["open"] else "هابطة"
-    ema_cross = (
-        "صعود" if (prev["EMA9"] < prev["EMA21"] and last["EMA9"] > last["EMA21"])
-        else "هبوط" if (prev["EMA9"] > prev["EMA21"] and last["EMA9"] < last["EMA21"])
-        else "جانبي"
-    )
+    direction = "صاعدة" if last["Close"] > last["Open"] else "هابطة"
+    ema_cross = "صعود" if prev["EMA9"] < prev["EMA21"] and last["EMA9"] > last["EMA21"] else "هبوط" if prev["EMA9"] > prev["EMA21"] and last["EMA9"] < last["EMA21"] else "جانبي"
     rsi_zone = "تشبع بيع" if last["RSI"] < 30 else "تشبع شراء" if last["RSI"] > 70 else "محايد"
+
     summary = (
-        f"الاتجاه: {direction}\n"
+        f"الاتجاه المتوقع: {direction}\n"
         f"تقاطع EMA: {ema_cross}\n"
         f"RSI: {last['RSI']:.2f} ({rsi_zone})\n"
         f"الدعم: {last['Support']:.2f} | المقاومة: {last['Resistance']:.2f}"
     )
-    return last["close"], summary
+    return last["Close"], summary
 
 def hourly_price_update():
     last_sent_hour = -1
     while True:
         now = datetime.utcnow()
-        if now.minute == 0 and now.hour != last_sent_hour:
+        if now.hour != last_sent_hour and now.minute >= 0:
             last_sent_hour = now.hour
             try:
                 print(f"تشغيل التحديث الساعة {now.strftime('%H:%M')} UTC")
-                msg = f"⏰ تحديث الساعة {now.strftime('%H:%M')} UTC\n\n"
+                msg = f"تحديث الساعة {now.strftime('%H:%M')} UTC\n"
                 for name, info in assets.items():
                     df = fetch_daily_data(info["symbol"])
-                    if df is None or len(df) < 1000:
-                        msg += f"• {name}: ❌ فشل جلب البيانات أو البيانات غير كافية.\n"
+                    if df is None:
+                        msg += f"\n{name}: البيانات غير متوفرة (فشل جلب البيانات من المصدر).\n"
+                    elif df.empty:
+                        msg += f"\n{name}: البيانات غير متوفرة (البيانات فاضية).\n"
+                    elif len(df) < 1000:
+                        msg += f"\n{name}: البيانات غير كافية (< 1000 شمعة).\n"
                     else:
                         df = calculate_indicators(df)
                         price, direction_info = analyze_next_hour_direction(df)
-                        msg += f"• {name}:\n  - السعر: {price:.2f}\n  - {direction_info}\n"
+                        msg += f"\n{name}:\nالسعر الحالي: {price:.2f}\n{direction_info}\n"
                 send_telegram_message(msg)
             except Exception as e:
-                error_msg = f"خطأ في التحديث: {str(e)}"
+                error_msg = f"Error in hourly update: {e}"
                 print(error_msg)
-                send_telegram_message(f"⚠️ {error_msg}")
-        time.sleep(60)
+                send_telegram_message(f"تنبيه: {error_msg}")
+        time.sleep(30)
 
 if __name__ == "__main__":
     keep_alive()
