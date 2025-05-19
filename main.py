@@ -18,7 +18,6 @@ def keep_alive():
     t = Thread(target=run)
     t.start()
 
-# إعداد التوكن والقناة
 BOT_TOKEN = "7883771248:AAFfwmcF3hcHz17_IG0KfyOCSGLjMBzyg8E"
 CHANNEL_ID = "@hashimali1986"
 
@@ -31,27 +30,22 @@ def send_telegram_message(text):
         print(f"Telegram Error: {e}")
 
 assets = {
-    "ذهب": {"symbol": "GC=F", "target": 20},
-    "بيتكوين": {"symbol": "BTC-USD", "target": 2000},
-    "SPX": {"symbol": "^GSPC", "target": 50},
-    "NDX": {"symbol": "^NDX", "target": 300}
+    "ذهب": {"symbol": "GC=F"},
+    "بيتكوين": {"symbol": "BTC-USD"},
+    "SPX": {"symbol": "^GSPC"},
+    "NDX": {"symbol": "^NDX"}
 }
 
-active_trades = {}
-trade_start_times = {}
-last_summary_time = time.time()
-
-def fetch_data(symbol):
+def fetch_daily_data(symbol):
     try:
-        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=1y&interval=1d"
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=3y&interval=1d"
         headers = {"User-Agent": "Mozilla/5.0"}
         response = requests.get(url, headers=headers)
         data = response.json()
         result = data["chart"]["result"][0]
         timestamps = result["timestamp"]
         prices = result["indicators"]["quote"][0]
-        if not all(key in prices for key in ["Open", "High", "Low", "Close"]):
-            print(f"Missing required keys in data for {symbol}")
+        if not all(k in prices for k in ["Open", "High", "Low", "Close"]):
             return None
         df = pd.DataFrame(prices)
         df["Date"] = pd.to_datetime(timestamps, unit="s")
@@ -60,22 +54,6 @@ def fetch_data(symbol):
     except Exception as e:
         print(f"fetch_data error: {e}")
         return None
-
-def get_upcoming_news():
-    try:
-        url = "https://site.api.efxdata.com/calendar?days=1"
-        headers = {"User-Agent": "Mozilla/5.0"}
-        r = requests.get(url, headers=headers)
-        if r.status_code == 200:
-            news = r.json()
-            now = datetime.utcnow()
-            for item in news.get("data", []):
-                event_time = datetime.strptime(item["datetime"], "%Y-%m-%dT%H:%M:%SZ")
-                if 0 <= (event_time - now).total_seconds() <= 3600 and item["impact"] in ["High", "Medium"]:
-                    return f"تنبيه: خبر اقتصادي قريب - {item['title']} الساعة {event_time.strftime('%H:%M')} UTC"
-        return ""
-    except:
-        return ""
 
 def calculate_indicators(df):
     df["EMA9"] = df["Close"].ewm(span=9).mean()
@@ -89,108 +67,40 @@ def calculate_indicators(df):
     df["Resistance"] = df["High"].rolling(50).max()
     return df
 
-def analyze_candle(df):
-    last = df.iloc[-1]
-    return "صاعدة" if last["Close"] > last["Open"] else "هابطة"
-
-def check_signal(df, name, target):
+def analyze_next_hour_direction(df):
     last = df.iloc[-1]
     prev = df.iloc[-2]
-    price = last["Close"]
-    candle_type = analyze_candle(df)
-    signal = "buy" if candle_type == "صاعدة" else "sell"
-    strength = "قوية" if (
-        (signal == "buy" and prev["EMA9"] < prev["EMA21"] and last["EMA9"] > last["EMA21"] and last["RSI"] < 35)
-        or
-        (signal == "sell" and prev["EMA9"] > prev["EMA21"] and last["EMA9"] < last["EMA21"] and last["RSI"] > 65)
-    ) else "ضعيفة – للمراقبة فقط"
+    direction = "صاعدة" if last["Close"] > last["Open"] else "هابطة"
 
-    entry = price
-    goal = entry + target if signal == "buy" else entry - target
-    active_trades[name] = {"type": signal, "entry": entry, "target": goal}
-    trade_start_times[name] = datetime.now()
-
-    news_alert = get_upcoming_news()
-    msg = (
-        f"#{name}\n"
-        f"نوع الشمعة: {candle_type}\n"
-        f"إشارة: {signal.upper()} ({strength})\n"
-        f"الدخول: {entry:.2f} → الهدف: {goal:.2f}\n"
-        f"RSI: {last['RSI']:.2f}, EMA9: {last['EMA9']:.2f}, EMA21: {last['EMA21']:.2f}\n"
-        f"الدعم: {last['Support']:.2f}, المقاومة: {last['Resistance']:.2f}\n"
-        f"الوقت: {datetime.utcnow().strftime('%Y-%m-%d %H:%M')} UTC\n"
-        f"{news_alert}"
+    # إشارات إضافية:
+    ema_cross = "صعود" if prev["EMA9"] < prev["EMA21"] and last["EMA9"] > last["EMA21"] else "هبوط" if prev["EMA9"] > prev["EMA21"] and last["EMA9"] < last["EMA21"] else "جانبي"
+    rsi_zone = "تشبع بيع" if last["RSI"] < 30 else "تشبع شراء" if last["RSI"] > 70 else "محايد"
+    
+    summary = (
+        f"الاتجاه المتوقع: {direction}\n"
+        f"تقاطع EMA: {ema_cross}\n"
+        f"RSI: {last['RSI']:.2f} ({rsi_zone})\n"
+        f"الدعم: {last['Support']:.2f} | المقاومة: {last['Resistance']:.2f}"
     )
-    send_telegram_message(msg)
-
-def monitor_trades():
-    for name in list(active_trades.keys()):
-        df = fetch_data(assets[name]["symbol"])
-        if df is None:
-            continue
-        current_price = df["Close"].iloc[-1]
-        trade = active_trades[name]
-        if (trade["type"] == "buy" and current_price >= trade["target"]) or (
-            trade["type"] == "sell" and current_price <= trade["target"]):
-            send_telegram_message(f"#{name} تحقق الهدف: {trade['type'].upper()} عند {trade['target']:.2f}")
-            del active_trades[name]
-            del trade_start_times[name]
-        else:
-            elapsed = datetime.utcnow() - trade_start_times[name]
-            if elapsed.total_seconds() >= 4 * 3600:
-                send_telegram_message(f"#{name} | تم إغلاق الصفقة بعد 4 ساعات دون تحقيق الهدف.")
-                del active_trades[name]
-                del trade_start_times[name]
-
-def summarize():
-    global last_summary_time
-    if time.time() - last_summary_time >= 86400:
-        summary = f"ملخص يومي: عدد التوصيات الحالية: {len(active_trades)}"
-        send_telegram_message(summary)
-        last_summary_time = time.time()
-
-def analyze_next_hour_candle(df):
-    last = df.iloc[-1]
-    return "صاعدة" if last["Close"] > last["Open"] else "هابطة"
+    return last["Close"], summary
 
 def hourly_price_update():
     while True:
         now = datetime.utcnow()
         if now.minute == 0:
-            try:
-                msg = f"تحديث الساعة {now.strftime('%H:%M')} UTC\n"
-                for name, info in assets.items():
-                    df_hour = fetch_data(info["symbol"])
-                    if df_hour is not None and not df_hour.empty:
-                        price = df_hour["Close"].iloc[-1]
-                        df_day = fetch_data(info["symbol"])
-                        direction = "غير متاح"
-                        if df_day is not None and len(df_day) >= 1000:
-                            df_day = calculate_indicators(df_day)
-                            direction = analyze_next_hour_candle(df_day[-1000:])
-                        msg += f"\n{name}:\nالسعر الحالي: {price:.2f}\nتوقع شمعة الساعة القادمة: {direction}"
-                send_telegram_message(msg)
-            except Exception as e:
-                print(f"Error in hourly update: {e}")
-        time.sleep(60)
-
-def main_loop():
-    last_checked_hour = -1
-    Thread(target=hourly_price_update).start()
-    while True:
-        now = datetime.utcnow()
-        if now.hour % 4 == 0 and now.hour != last_checked_hour:
-            last_checked_hour = now.hour
+            msg = f"تحديث الساعة {now.strftime('%H:%M')} UTC\n"
             for name, info in assets.items():
-                df = fetch_data(info["symbol"])
-                if df is not None and not df.empty:
+                df = fetch_daily_data(info["symbol"])
+                if df is not None and len(df) >= 1000:
                     df = calculate_indicators(df)
-                    check_signal(df, name, info["target"])
-        monitor_trades()
-        summarize()
-        time.sleep(900)
+                    price, direction_info = analyze_next_hour_direction(df)
+                    msg += f"\n{name}:\nالسعر الحالي: {price:.2f}\n{direction_info}\n"
+                else:
+                    msg += f"\n{name}: البيانات غير متوفرة.\n"
+            send_telegram_message(msg)
+        time.sleep(60)
 
 if __name__ == "__main__":
     keep_alive()
-    send_telegram_message("✅ تم تشغيل المحلل الذكي VIP بنجاح مع تحديثات كل ساعة وربط الأخبار.")
-    main_loop()
+    send_telegram_message("✅ تم تشغيل المحلل الذكي بنجاح: إرسال كل ساعة + تحليل 1000 شمعة يومية.")
+    Thread(target=hourly_price_update).start()
