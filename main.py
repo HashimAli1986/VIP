@@ -179,15 +179,17 @@ def monitor_assets():
                 trend_type = detect_trend_pattern(df)
                 df = generate_signals(df)
 
+                # سكالبينج
                 scalping_msg = scalping_strategy(asset, df)
                 bot.send_message(CHANNEL_ID, scalping_msg, parse_mode="Markdown")
 
+                # تحقق من إشارة الشراء أو البيع
                 if df['Buy_Signal'].iloc[-1]:
                     send_alert(asset, "شراء", df, trend_type)
                 elif df['Sell_Signal'].iloc[-1]:
                     send_alert(asset, "بيع", df, trend_type)
 
-            time.sleep(300)
+            time.sleep(300)  # كل 5 دقائق
         except Exception as e:
             bot.send_message(CHANNEL_ID, f"⚠️ خطأ: {str(e)}")
             time.sleep(60)
