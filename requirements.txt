@@ -1,6 +1,4 @@
 yfinance  
 pandas  
-telebot  
-ta  
-ccxt
+telebot
 numpy
