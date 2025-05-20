@@ -6,12 +6,10 @@ from datetime import datetime
 import telebot
 import requests
 
-# ------------------- إعدادات التليجرام ------------------- #
 BOT_TOKEN = "7883771248:AAFfwmcF3hcHz17_IG0KfyOCSGLjMBzyg8E"
 CHANNEL_ID = "@hashimali1986"
 bot = telebot.TeleBot(BOT_TOKEN)
 
-# ------------------- إعدادات الأصول ------------------- #
 ASSETS = {
     "ذهب": "GC=F",
     "بيتكوين": "BTC-USD",
@@ -21,7 +19,6 @@ ASSETS = {
 
 TIMEFRAME = "5m"
 
-# ------------------- دوال المؤشرات اليدوية ------------------- #
 def calculate_ema(series, period):
     return series.ewm(span=period, adjust=False).mean()
 
@@ -48,7 +45,6 @@ def calculate_macd(series, fast=12, slow=26, signal=9):
     signal_line = calculate_ema(macd_line, signal)
     return macd_line, signal_line
 
-# ------------------- الأخبار الاقتصادية ------------------- #
 def check_upcoming_news():
     try:
         url = "https://site.api.efxdata.com/calendar?days=1"
@@ -66,13 +62,12 @@ def check_upcoming_news():
     except:
         return False
 
-# ------------------- التحليل الفني ------------------- #
 def fetch_realtime_data(symbol):
     data = yf.download(symbol, period="7d", interval=TIMEFRAME)
     return data.dropna().tail(1000)
 
 def calculate_indicators(df):
-    close = df['Close']
+    close = df['Close'].squeeze()
     df['EMA9'] = calculate_ema(close, 9)
     df['EMA21'] = calculate_ema(close, 21)
     df['RSI'] = calculate_rsi(close)
@@ -82,11 +77,11 @@ def calculate_indicators(df):
 
 def detect_trend_pattern(df):
     last_1000 = df.tail(1000)
-    bullish_count = (last_1000['Close'] > last_1000['Open']).sum()
-    bearish_count = (last_1000['Close'] < last_1000['Open']).sum()
+    bullish = (last_1000['Close'] > last_1000['Open']).sum()
+    bearish = (last_1000['Close'] < last_1000['Open']).sum()
     total = len(last_1000)
-    ratio_bull = bullish_count / total
-    ratio_bear = bearish_count / total
+    ratio_bull = bullish / total
+    ratio_bear = bearish / total
     if ratio_bull > 0.6:
         return "صعودي"
     elif ratio_bear > 0.6:
@@ -95,8 +90,8 @@ def detect_trend_pattern(df):
         return "جانبي"
 
 def generate_signals(df):
-    df['Buy_Signal'] = (df['EMA9'] > df['EMA21']) & (df['RSI'] < 30) & (df['Close'] < df['BB_Lower'])
-    df['Sell_Signal'] = (df['EMA9'] < df['EMA21']) & (df['RSI'] > 70) & (df['Close'] > df['BB_Upper'])
+    df['Buy_Signal'] = ((df['EMA9'] > df['EMA21']) & (df['RSI'] < 30) & (df['Close'] < df['BB_Lower']))
+    df['Sell_Signal'] = ((df['EMA9'] < df['EMA21']) & (df['RSI'] > 70) & (df['Close'] > df['BB_Upper']))
     return df
 
 def send_alert(asset, signal_type, df, trend_type):
@@ -104,7 +99,6 @@ def send_alert(asset, signal_type, df, trend_type):
     price = float(last_row['Close'])
     rsi = float(last_row['RSI'])
     time_str = datetime.now().strftime("%H:%M:%S")
-    
     message = f"""
 🚨 **إشارة {signal_type} لـ {asset}** 🚨
 - السعر: `{price:.2f}`
@@ -114,7 +108,6 @@ def send_alert(asset, signal_type, df, trend_type):
     """
     bot.send_message(CHANNEL_ID, message, parse_mode="Markdown")
 
-# ------------------- المراقبة التلقائية ------------------- #
 def monitor_assets():
     while True:
         try:
@@ -130,21 +123,15 @@ def monitor_assets():
                 df = calculate_indicators(df)
                 trend_type = detect_trend_pattern(df)
                 df = generate_signals(df)
-                last_row = df.iloc[-1]
-                
-                if last_row['Buy_Signal']:
+                if df['Buy_Signal'].iloc[-1]:
                     send_alert(asset, "شراء", df, trend_type)
-                elif last_row['Sell_Signal']:
+                elif df['Sell_Signal'].iloc[-1]:
                     send_alert(asset, "بيع", df, trend_type)
-            
             time.sleep(300)
-        
         except Exception as e:
-            error_msg = f"⚠️ خطأ: {str(e)}"
-            bot.send_message(CHANNEL_ID, error_msg)
+            bot.send_message(CHANNEL_ID, f"⚠️ خطأ: {str(e)}")
             time.sleep(60)
 
-# ------------------- التشغيل الرئيسي ------------------- #
 if __name__ == "__main__":
-    bot.send_message(CHANNEL_ID, "✅ النظام يعمل الآن: مؤشرات + تحليل 1000 شمعة (صعود/هبوط) + مراقبة الأخبار.")
+    bot.send_message(CHANNEL_ID, "✅ النظام يعمل الآن: مؤشرات + تحليل 1000 شمعة + اتجاه (صعود/هبوط) + مراقبة أخبار.")
     monitor_assets()
