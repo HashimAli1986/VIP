@@ -1,200 +1,135 @@
-import yfinance as yf
-import pandas as pd
-import numpy as np
-import time
-from datetime import datetime
-import telebot
-import requests
+‏import requests
+‏import pandas as pd
+‏import time
+‏from datetime import datetime
+‏from flask import Flask
+‏from threading import Thread
 
-BOT_TOKEN = "7883771248:AAFfwmcF3hcHz17_IG0KfyOCSGLjMBzyg8E"
-CHANNEL_ID = "@hashimali1986"
-bot = telebot.TeleBot(BOT_TOKEN)
+‏app = Flask('')
 
-ASSETS = {
-    "ذهب": "GC=F",
-    "بيتكوين": "BTC-USD",
-    "S&P500": "^GSPC",
-    "Nasdaq": "^NDX"
+‏@app.route('/')
+‏def home():
+‏    return "المحلل الذكي يعمل بنجاح"
+
+‏def run():
+‏    app.run(host='0.0.0.0', port=8080)
+
+‏def keep_alive():
+‏    t = Thread(target=run)
+‏    t.start()
+
+‏BOT_TOKEN = "7883771248:AAFfwmcF3hcHz17_IG0KfyOCSGLjMBzyg8E"
+‏CHANNEL_ID = "@hashimali1986"
+
+‏def send_telegram_message(text):
+‏    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+‏    data = {"chat_id": CHANNEL_ID, "text": text}
+‏    try:
+‏        requests.post(url, data=data)
+‏    except Exception as e:
+‏        print(f"Telegram Error: {e}")
+
+‏assets = {
+    "ذهب": {"symbol": "GC=F"},
+    "بيتكوين": {"symbol": "BTC-USD"},
+‏    "SPX": {"symbol": "^GSPC"},
+‏    "NDX": {"symbol": "^NDX"}
 }
 
-TIMEFRAME = "5m"
+‏def fetch_daily_data(symbol):
+‏    try:
+        # تم تغيير النطاق الزمني من 3y إلى 5y لضمان 1000 شمعة
+‏        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=5y&interval=1d"
+‏        headers = {"User-Agent": "Mozilla/5.0"}
+‏        response = requests.get(url, headers=headers)
+‏        data = response.json()
+        
+        # تحقق من وجود بيانات في النتيجة
+‏        if not data["chart"]["result"]:
+‏            print(f"لا توجد بيانات لـ {symbol}")
+‏            return None
+            
+‏        result = data["chart"]["result"][0]
+‏        timestamps = result["timestamp"]
+‏        prices = result["indicators"]["quote"][0]
+        
+        # التعديل هنا: استخدام مفاتيح بأحرف صغيرة
+‏        if not all(k in prices for k in ["open", "high", "low", "close"]):
+‏            print(f"بيانات غير مكتملة لـ {symbol}")
+‏            return None
+            
+‏        df = pd.DataFrame({
+‏            "Open": prices["open"],
+‏            "High": prices["high"],
+‏            "Low": prices["low"],
+‏            "Close": prices["close"]
+        })
+        
+‏        df["Date"] = pd.to_datetime(timestamps, unit="s")
+‏        df.set_index("Date", inplace=True)
+        
+        # إرجاع آخر 1000 شمعة (حتى لو كانت البيانات أكثر)
+‏        return df.dropna().iloc[-1000:]  
+‏    except Exception as e:
+‏        print(f"fetch_data error ({symbol}): {e}")
+‏        return None
 
-def calculate_ema(series, period):
-    return series.ewm(span=period, adjust=False).mean()
+‏def calculate_indicators(df):
+‏    df["EMA9"] = df["Close"].ewm(span=9).mean()
+‏    df["EMA21"] = df["Close"].ewm(span=21).mean()
+‏    delta = df["Close"].diff()
+‏    gain = delta.where(delta > 0, 0).rolling(14).mean()
+‏    loss = -delta.where(delta < 0, 0).rolling(14).mean()
+‏    rs = gain / loss
+‏    df["RSI"] = 100 - (100 / (1 + rs))
+‏    df["Support"] = df["Low"].rolling(50).min()
+‏    df["Resistance"] = df["High"].rolling(50).max()
+‏    return df
 
-def calculate_rsi(series, period=14):
-    delta = series.diff()
-    gain = delta.where(delta > 0, 0)
-    loss = -delta.where(delta < 0, 0)
-    avg_gain = gain.rolling(window=period).mean()
-    avg_loss = loss.rolling(window=period).mean()
-    rs = avg_gain / avg_loss
-    return 100 - (100 / (1 + rs))
+‏def analyze_next_hour_direction(df):
+‏    last = df.iloc[-1]
+‏    prev = df.iloc[-2]
+‏    direction = "صاعدة" if last["Close"] > last["Open"] else "هابطة"
+‏    ema_cross = "صعود" if prev["EMA9"] < prev["EMA21"] and last["EMA9"] > last["EMA21"] else "هبوط" if prev["EMA9"] > prev["EMA21"] and last["EMA9"] < last["EMA21"] else "جانبي"
+‏    rsi_zone = "تشبع بيع" if last["RSI"] < 30 else "تشبع شراء" if last["RSI"] > 70 else "محايد"
 
-def calculate_bollinger_bands(series, period=20, num_std=2):
-    ma = series.rolling(window=period).mean()
-    std = series.rolling(window=period).std()
-    upper = ma + num_std * std
-    lower = ma - num_std * std
-    return upper, lower
+‏    summary = (
+‏        f"الاتجاه المتوقع: {direction}\n"
+‏        f"تقاطع EMA: {ema_cross}\n"
+‏        f"RSI: {last['RSI']:.2f} ({rsi_zone})\n"
+‏        f"الدعم: {last['Support']:.2f} | المقاومة: {last['Resistance']:.2f}"
+    )
+‏    return last["Close"], summary
 
-def calculate_macd(series, fast=12, slow=26, signal=9):
-    ema_fast = calculate_ema(series, fast)
-    ema_slow = calculate_ema(series, slow)
-    macd_line = ema_fast - ema_slow
-    signal_line = calculate_ema(macd_line, signal)
-    return macd_line, signal_line
+‏def hourly_price_update():
+‏    last_sent_hour = -1
+‏    while True:
+‏        now = datetime.utcnow()
+‏        if now.hour != last_sent_hour and now.minute >= 0:
+‏            last_sent_hour = now.hour
+‏            try:
+‏                print(f"تشغيل التحديث الساعة {now.strftime('%H:%M')} UTC")
+‏                msg = f"تحديث الساعة {now.strftime('%H:%M')} UTC\n"
+‏                for name, info in assets.items():
+‏                    df = fetch_daily_data(info["symbol"])
+‏                    if df is None:
+‏                        msg += f"\n{name}: البيانات غير متوفرة (فشل جلب البيانات من المصدر).\n"
+‏                    elif df.empty:
+‏                        msg += f"\n{name}: البيانات غير متوفرة (البيانات فاضية).\n"
+‏                    elif len(df) < 1000:
+‏                        msg += f"\n{name}: البيانات غير كافية (< 1000 شمعة).\n"
+‏                    else:
+‏                        df = calculate_indicators(df)
+‏                        price, direction_info = analyze_next_hour_direction(df)
+‏                        msg += f"\n{name}:\nالسعر الحالي: {price:.2f}\n{direction_info}\n"
+‏                send_telegram_message(msg)
+‏            except Exception as e:
+‏                error_msg = f"Error in hourly update: {e}"
+‏                print(error_msg)
+‏                send_telegram_message(f"تنبيه: {error_msg}")
+‏        time.sleep(30)
 
-def check_upcoming_news():
-    try:
-        url = "https://site.api.efxdata.com/calendar?days=1"
-        headers = {"User-Agent": "Mozilla/5.0"}
-        response = requests.get(url, headers=headers)
-        if response.status_code != 200:
-            return False
-        data = response.json()
-        now = datetime.utcnow()
-        for item in data.get("data", []):
-            event_time = datetime.strptime(item["datetime"], "%Y-%m-%dT%H:%M:%SZ")
-            if 0 <= (event_time - now).total_seconds() <= 900 and item["impact"] in ["High", "Medium"]:
-                return True
-        return False
-    except:
-        return False
-
-def fetch_realtime_data(symbol):
-    data = yf.download(symbol, period="7d", interval=TIMEFRAME)
-    return data.dropna().tail(1000)
-
-def calculate_indicators(df):
-    close = df['Close'].squeeze()
-    df['EMA9'] = calculate_ema(close, 9)
-    df['EMA21'] = calculate_ema(close, 21)
-    df['RSI'] = calculate_rsi(close)
-    df['BB_Upper'], df['BB_Lower'] = calculate_bollinger_bands(close)
-    df['MACD'], df['MACD_Signal'] = calculate_macd(close)
-    return df
-
-def detect_trend_pattern(df):
-    last_1000 = df.tail(1000)
-    bullish = (last_1000['Close'] > last_1000['Open']).sum()
-    bearish = (last_1000['Close'] < last_1000['Open']).sum()
-    total = len(last_1000)
-    ratio_bull = bullish / total
-    ratio_bear = bearish / total
-    if ratio_bull > 0.6:
-        return "صعودي"
-    elif ratio_bear > 0.6:
-        return "هبوطي"
-    else:
-        return "جانبي"
-
-def generate_signals(df):
-    df['Buy_Signal'] = ((df['EMA9'] > df['EMA21']) & (df['RSI'] < 30) & (df['Close'] < df['BB_Lower']))
-    df['Sell_Signal'] = ((df['EMA9'] < df['EMA21']) & (df['RSI'] > 70) & (df['Close'] > df['BB_Upper']))
-    return df
-
-def scalping_strategy(asset, df):
-    last = df.iloc[-1]
-    signal = ""
-    entry_zone = ""
-    stop_loss = ""
-    take_profit = ""
-
-    if asset == "ذهب":
-        if last["EMA9"] < last["EMA21"] and last["RSI"] < 50 and last["Close"] < 3235:
-            signal = "بيع"
-            entry_zone = "3228 - 3235"
-            stop_loss = "3238"
-            take_profit = "3210"
-        elif last["EMA9"] > last["EMA21"] and last["RSI"] > 40 and last["Close"] < 3210:
-            signal = "شراء"
-            entry_zone = "3205 - 3210"
-            stop_loss = "3200"
-            take_profit = "3220"
-
-    elif asset == "بيتكوين":
-        if last["RSI"] > 75:
-            signal = "بيع"
-            entry_zone = "قرب المقاومة الحالية"
-            stop_loss = f"{last['Close'] + 1500:.2f}"
-            take_profit = f"{last['Close'] - 2000:.2f}"
-        elif last["RSI"] < 35:
-            signal = "شراء"
-            entry_zone = "قرب الدعم الحالية"
-            stop_loss = f"{last['Close'] - 1500:.2f}"
-            take_profit = f"{last['Close'] + 2000:.2f}"
-
-    elif asset in ["S&P500", "Nasdaq"]:
-        if last["RSI"] > 80:
-            signal = "بيع"
-            entry_zone = "قرب المقاومة"
-            stop_loss = f"{last['Close'] + 30:.2f}"
-            take_profit = f"{last['Close'] - 40:.2f}"
-        elif last["RSI"] < 30:
-            signal = "شراء"
-            entry_zone = "قرب الدعم"
-            stop_loss = f"{last['Close'] - 30:.2f}"
-            take_profit = f"{last['Close'] + 40:.2f}"
-
-    if signal:
-        return f"""
-**سكالبينج {asset}**
-
-- الحالة: `{signal}`
-- منطقة الدخول: `{entry_zone}`
-- الهدف: `{take_profit}`
-- وقف الخسارة: `{stop_loss}`
-"""
-    else:
-        return f"**سكالبينج {asset}**: لا توجد فرصة واضحة الآن."
-
-def send_alert(asset, signal_type, df, trend_type):
-    last_row = df.iloc[-1]
-    price = float(last_row['Close'])
-    rsi = float(last_row['RSI'])
-    time_str = datetime.now().strftime("%H:%M:%S")
-    message = f"""
-🚨 **إشارة {signal_type} لـ {asset}** 🚨
-- السعر: `{price:.2f}`
-- RSI: `{rsi:.2f}`
-- نمط آخر 1000 شمعة: `{trend_type}`
-- الوقت: `{time_str}`
-"""
-    bot.send_message(CHANNEL_ID, message, parse_mode="Markdown")
-
-def monitor_assets():
-    while True:
-        try:
-            if check_upcoming_news():
-                bot.send_message(CHANNEL_ID, "⏸️ تم إيقاف التنبيهات مؤقتًا بسبب خبر اقتصادي مهم خلال دقائق.")
-                time.sleep(300)
-                continue
-
-            for asset, symbol in ASSETS.items():
-                df = fetch_realtime_data(symbol)
-                if df.empty or len(df) < 100:
-                    continue
-
-                df = calculate_indicators(df)
-                trend_type = detect_trend_pattern(df)
-                df = generate_signals(df)
-
-                # سكالبينج
-                scalping_msg = scalping_strategy(asset, df)
-                bot.send_message(CHANNEL_ID, scalping_msg, parse_mode="Markdown")
-
-                # إشارات كلاسيكية (معالجة الخطأ)
-                if not df['Buy_Signal'].empty and df['Buy_Signal'].iloc[-1]:
-                    send_alert(asset, "شراء", df, trend_type)
-                elif not df['Sell_Signal'].empty and df['Sell_Signal'].iloc[-1]:
-                    send_alert(asset, "بيع", df, trend_type)
-
-            time.sleep(300)
-        except Exception as e:
-            bot.send_message(CHANNEL_ID, f"⚠️ خطأ: {str(e)}")
-            time.sleep(60)
-
-if __name__ == "__main__":
-    bot.send_message(CHANNEL_ID, "✅ النظام يعمل الآن: سكالبينج + مؤشرات فنية + تحليل 1000 شمعة + مراقبة أخبار.")
-    monitor_assets()
+‏if __name__ == "__main__":
+‏    keep_alive()
+‏    send_telegram_message("✅ تم تشغيل المحلل الذكي بنجاح: إرسال كل ساعة + تحليل 1000 شمعة يومية.")
+‏    Thread(target=hourly_price_update).start()
