@@ -30,7 +30,17 @@ def send_telegram_message(text):
         print(f"Telegram Error: {e}")
 
 assets = {
-    "ذهب": {"symbol": "GC=F"},
+    "MSTR": {"symbol": "MSTR"},
+    "APP": {"symbol": "APP"},
+    "AVGO": {"symbol": "AVGO"},
+    "SMCI": {"symbol": "SMCI"},
+    "GS": {"symbol": "GS"},
+    "MU": {"symbol": "MU"},
+    "META": {"symbol": "META"},
+    "APPL": {"symbol": "APPL"},
+    "COIN": {"symbol": "COIN"},
+    "TSLA": {"symbol": "TSLA"},
+    "LLY": {"symbol": "LLY"},
     "بيتكوين": {"symbol": "BTC-USD"},
     "SPX": {"symbol": "^GSPC"},
     "NDX": {"symbol": "^NDX"}
@@ -38,13 +48,11 @@ assets = {
 
 def fetch_daily_data(symbol):
     try:
-        # تم تغيير النطاق الزمني من 3y إلى 5y لضمان 1000 شمعة
         url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=5y&interval=1d"
         headers = {"User-Agent": "Mozilla/5.0"}
         response = requests.get(url, headers=headers)
         data = response.json()
         
-        # تحقق من وجود بيانات في النتيجة
         if not data["chart"]["result"]:
             print(f"لا توجد بيانات لـ {symbol}")
             return None
@@ -53,7 +61,6 @@ def fetch_daily_data(symbol):
         timestamps = result["timestamp"]
         prices = result["indicators"]["quote"][0]
         
-        # التعديل هنا: استخدام مفاتيح بأحرف صغيرة
         if not all(k in prices for k in ["open", "high", "low", "close"]):
             print(f"بيانات غير مكتملة لـ {symbol}")
             return None
@@ -67,8 +74,6 @@ def fetch_daily_data(symbol):
         
         df["Date"] = pd.to_datetime(timestamps, unit="s")
         df.set_index("Date", inplace=True)
-        
-        # إرجاع آخر 1000 شمعة (حتى لو كانت البيانات أكثر)
         return df.dropna().iloc[-1000:]  
     except Exception as e:
         print(f"fetch_data error ({symbol}): {e}")
