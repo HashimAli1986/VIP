@@ -1,6 +1,3 @@
 requests
 pandas
 flask
-yfinance
-telebot
-numpy
