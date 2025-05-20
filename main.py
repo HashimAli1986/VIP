@@ -175,6 +175,7 @@ def monitor_assets():
                 df = fetch_realtime_data(symbol)
                 if df.empty or len(df) < 100:
                     continue
+
                 df = calculate_indicators(df)
                 trend_type = detect_trend_pattern(df)
                 df = generate_signals(df)
@@ -183,17 +184,17 @@ def monitor_assets():
                 scalping_msg = scalping_strategy(asset, df)
                 bot.send_message(CHANNEL_ID, scalping_msg, parse_mode="Markdown")
 
-                # تحقق من إشارة الشراء أو البيع
-                if df['Buy_Signal'].iloc[-1]:
+                # إشارات كلاسيكية (معالجة الخطأ)
+                if not df['Buy_Signal'].empty and df['Buy_Signal'].iloc[-1]:
                     send_alert(asset, "شراء", df, trend_type)
-                elif df['Sell_Signal'].iloc[-1]:
+                elif not df['Sell_Signal'].empty and df['Sell_Signal'].iloc[-1]:
                     send_alert(asset, "بيع", df, trend_type)
 
-            time.sleep(300)  # كل 5 دقائق
+            time.sleep(300)
         except Exception as e:
             bot.send_message(CHANNEL_ID, f"⚠️ خطأ: {str(e)}")
             time.sleep(60)
 
 if __name__ == "__main__":
-    bot.send_message(CHANNEL_ID, "✅ النظام يعمل الآن: سكالبينج + تحليل فني + أخبار.")
+    bot.send_message(CHANNEL_ID, "✅ النظام يعمل الآن: سكالبينج + مؤشرات فنية + تحليل 1000 شمعة + مراقبة أخبار.")
     monitor_assets()
