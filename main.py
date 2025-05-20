@@ -32,11 +32,11 @@ def calculate_indicators(df):
     df['EMA9'] = EMAIndicator(close=df['Close'], window=9).ema_indicator()
     df['EMA21'] = EMAIndicator(close=df['Close'], window=21).ema_indicator()
     df['RSI'] = RSIIndicator(close=df['Close'], window=14).rsi()
-    
+
     bb = BollingerBands(close=df['Close'], window=20, window_dev=2)
     df['BB_Upper'] = bb.bollinger_hband()
     df['BB_Lower'] = bb.bollinger_lband()
-    
+
     macd = MACD(close=df['Close'], window_slow=26, window_fast=12, window_sign=9)
     df['MACD'] = macd.macd()
     df['MACD_Signal'] = macd.macd_signal()
