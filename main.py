@@ -131,4 +131,4 @@ def hourly_price_update():
 if __name__ == "__main__":
     keep_alive()
     send_telegram_message("✅ تم تشغيل المحلل الذكي بنجاح: توصيات فنية + تحليل شموع + تحديث كل ساعة.")
-    Thread(target=hourly_price_update).start()
+    Thread(target=hourly_price_update).start()hourly_price_update).start()y_price_update).start()
