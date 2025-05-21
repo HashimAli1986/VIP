@@ -33,8 +33,8 @@ def send_telegram_message(text):
 assets = {
     "ذهب": {"symbol": "GC=F"},
     "بيتكوين": {"symbol": "BTC-USD"},
-    "SPX": {"symbol": "ES=F"},   # Futures for S&P 500
-    "NDX": {"symbol": "NQ=F"}    # Futures for Nasdaq
+    "US500": {"symbol": "^US500"},  # تم التغيير من SPX إلى US500
+    "NDX": {"symbol": "^NDX"}
 }
 
 def fetch_intraday_data(symbol):
