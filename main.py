@@ -29,26 +29,23 @@ def send_telegram_message(text):
     except Exception as e:
         print(f"Telegram Error: {e}")
 
+# استخدام رموز العقود الآجلة
 assets = {
     "ذهب": {"symbol": "GC=F"},
     "بيتكوين": {"symbol": "BTC-USD"},
-    "SPX": {"symbol": "^GSPC"},
-    "NDX": {"symbol": "^NDX"}
+    "SPX": {"symbol": "ES=F"},   # Futures for S&P 500
+    "NDX": {"symbol": "NQ=F"}    # Futures for Nasdaq
 }
 
-def fetch_daily_data(symbol):
+def fetch_intraday_data(symbol):
     try:
-        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=5y&interval=1d"
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=1d&interval=1m"
         headers = {"User-Agent": "Mozilla/5.0"}
         response = requests.get(url, headers=headers)
         data = response.json()
-        if not data["chart"]["result"]:
-            return None
         result = data["chart"]["result"][0]
         timestamps = result["timestamp"]
         prices = result["indicators"]["quote"][0]
-        if not all(k in prices for k in ["open", "high", "low", "close"]):
-            return None
         df = pd.DataFrame({
             "Open": prices["open"],
             "High": prices["high"],
@@ -57,9 +54,9 @@ def fetch_daily_data(symbol):
         })
         df["Date"] = pd.to_datetime(timestamps, unit="s")
         df.set_index("Date", inplace=True)
-        return df.dropna().iloc[-1000:]
+        return df.dropna().tail(100)
     except Exception as e:
-        print(f"fetch_data error ({symbol}): {e}")
+        print(f"fetch_intraday_data error ({symbol}): {e}")
         return None
 
 def calculate_indicators(df):
@@ -117,8 +114,8 @@ def hourly_price_update():
             try:
                 msg = f"تحديث الساعة {now.strftime('%H:%M')} UTC\n"
                 for name, info in assets.items():
-                    df = fetch_daily_data(info["symbol"])
-                    if df is None or df.empty or len(df) < 1000:
+                    df = fetch_intraday_data(info["symbol"])
+                    if df is None or df.empty or len(df) < 50:
                         msg += f"\n{name}: البيانات غير متوفرة.\n"
                     else:
                         df = calculate_indicators(df)
@@ -127,10 +124,10 @@ def hourly_price_update():
                         msg += f"\n{report}"
                 send_telegram_message(msg)
             except Exception as e:
-                send_telegram_message(f"تنبيه: حدث خطأ أثناء التحديث: {e}")
+                send_telegram_message(f"⚠️ خطأ في التحديث: {e}")
         time.sleep(30)
 
 if __name__ == "__main__":
     keep_alive()
-    send_telegram_message("✅ تم تشغيل المحلل الذكي بنجاح: تفاصيل فنية + توصيات تلقائية.")
+    send_telegram_message("✅ تم تشغيل المحلل الذكي بنجاح باستخدام بيانات العقود الآجلة والمؤشرات اللحظية.")
     Thread(target=hourly_price_update).start()
