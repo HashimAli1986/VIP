@@ -33,7 +33,7 @@ def send_telegram_message(text):
 assets = {
     "ذهب": {"symbol": "GC=F"},
     "بيتكوين": {"symbol": "BTC-USD"},
-    "US500": {"symbol": "^US500"},  # تم التغيير من SPX إلى US500
+    "US500": {"symbol": "ES=F"},  # تم التغيير من SPX إلى US500
     "NDX": {"symbol": "^NDX"}
 }
 
