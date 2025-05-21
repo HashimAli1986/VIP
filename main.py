@@ -43,13 +43,11 @@ def fetch_daily_data(symbol):
         response = requests.get(url, headers=headers)
         data = response.json()
         if not data["chart"]["result"]:
-            print(f"لا توجد بيانات لـ {symbol}")
             return None
         result = data["chart"]["result"][0]
         timestamps = result["timestamp"]
         prices = result["indicators"]["quote"][0]
         if not all(k in prices for k in ["open", "high", "low", "close"]):
-            print(f"بيانات غير مكتملة لـ {symbol}")
             return None
         df = pd.DataFrame({
             "Open": prices["open"],
@@ -76,28 +74,39 @@ def calculate_indicators(df):
     df["Resistance"] = df["High"].rolling(50).max()
     return df
 
-def generate_trade_recommendation(name, price, direction, ema_cross, rsi_zone, support, resistance):
-    if name == "ذهب":
-        if direction == "صاعدة" and ema_cross == "صعود":
-            return f"- {name}\n  التوصية: شراء\n  نوع الصفقة: سكالب\n  الدخول: {price:.0f} – {price+3:.0f}\n  الهدف: {price+15:.0f}\n  وقف الخسارة: {price-10:.0f}\n  قوة الصفقة: قوية"
-        else:
-            return f"- {name}\n  التوصية: بيع\n  نوع الصفقة: سكالب\n  الدخول: {price-2:.0f} – {price+1:.0f}\n  الهدف: {price-20:.0f}\n  وقف الخسارة: {price+10:.0f}\n  قوة الصفقة: متوسطة"
-    elif name == "بيتكوين":
-        return f"- {name}\n  التوصية: بيع\n  نوع الصفقة: سكالب\n  الدخول: {price-100:.0f} – {price+100:.0f}\n  الهدف: {price-2000:.0f}\n  وقف الخسارة: {price+1000:.0f}\n  قوة الصفقة: متوسطة إلى قوية"
-    elif name == "SPX":
-        return f"- {name}\n  التوصية: بيع\n  نوع الصفقة: سكالب\n  الدخول: {price:.0f} – {price+10:.0f}\n  الهدف: {price-40:.0f}\n  وقف الخسارة: {price+30:.0f}\n  قوة الصفقة: قوية"
-    elif name == "NDX":
-        return f"- {name}\n  التوصية: بيع\n  نوع الصفقة: سكالب\n  الدخول: {price:.0f} – {price+20:.0f}\n  الهدف: {price-150:.0f}\n  وقف الخسارة: {price+100:.0f}\n  قوة الصفقة: قوية جدًا"
-    else:
-        return f"- {name}\n  التوصية: غير محددة\n"
-
 def analyze_next_hour_direction(df):
     last = df.iloc[-1]
     prev = df.iloc[-2]
     direction = "صاعدة" if last["Close"] > last["Open"] else "هابطة"
     ema_cross = "صعود" if prev["EMA9"] < prev["EMA21"] and last["EMA9"] > last["EMA21"] else "هبوط" if prev["EMA9"] > prev["EMA21"] and last["EMA9"] < last["EMA21"] else "جانبي"
     rsi_zone = "تشبع بيع" if last["RSI"] < 30 else "تشبع شراء" if last["RSI"] > 70 else "محايد"
-    return last["Close"], direction, ema_cross, rsi_zone, last["Support"], last["Resistance"]
+    return last["Close"], direction, ema_cross, rsi_zone, last["RSI"], last["Support"], last["Resistance"]
+
+def generate_full_report(name, price, direction, ema_cross, rsi_value, rsi_zone, support, resistance):
+    summary = (
+        f"{name}:\n"
+        f"السعر الحالي: {price:.2f}\n"
+        f"الاتجاه المتوقع: {direction}\n"
+        f"تقاطع EMA: {ema_cross}\n"
+        f"RSI: {rsi_value:.2f} ({rsi_zone})\n"
+        f"الدعم: {support:.2f} | المقاومة: {resistance:.2f}"
+    )
+
+    if name == "ذهب":
+        if direction == "صاعدة" and ema_cross == "صعود":
+            recommendation = f"التوصية: شراء | الدخول: {price:.0f}-{price+3:.0f} | الهدف: {price+15:.0f} | الوقف: {price-10:.0f} | القوة: قوية"
+        else:
+            recommendation = f"التوصية: بيع | الدخول: {price-2:.0f}-{price+1:.0f} | الهدف: {price-20:.0f} | الوقف: {price+10:.0f} | القوة: متوسطة"
+    elif name == "بيتكوين":
+        recommendation = f"التوصية: بيع | الدخول: {price-100:.0f}-{price+100:.0f} | الهدف: {price-2000:.0f} | الوقف: {price+1000:.0f} | القوة: متوسطة إلى قوية"
+    elif name == "SPX":
+        recommendation = f"التوصية: بيع | الدخول: {price:.0f}-{price+10:.0f} | الهدف: {price-40:.0f} | الوقف: {price+30:.0f} | القوة: قوية"
+    elif name == "NDX":
+        recommendation = f"التوصية: بيع | الدخول: {price:.0f}-{price+20:.0f} | الهدف: {price-150:.0f} | الوقف: {price+100:.0f} | القوة: قوية جدًا"
+    else:
+        recommendation = "التوصية: غير متوفرة"
+
+    return f"{summary}\n{recommendation}\n"
 
 def hourly_price_update():
     last_sent_hour = -1
@@ -113,9 +122,9 @@ def hourly_price_update():
                         msg += f"\n{name}: البيانات غير متوفرة.\n"
                     else:
                         df = calculate_indicators(df)
-                        price, direction, ema_cross, rsi_zone, support, resistance = analyze_next_hour_direction(df)
-                        recommendation = generate_trade_recommendation(name, price, direction, ema_cross, rsi_zone, support, resistance)
-                        msg += f"\n{recommendation}\n"
+                        price, direction, ema_cross, rsi_zone, rsi_value, support, resistance = analyze_next_hour_direction(df)
+                        report = generate_full_report(name, price, direction, ema_cross, rsi_value, rsi_zone, support, resistance)
+                        msg += f"\n{report}"
                 send_telegram_message(msg)
             except Exception as e:
                 send_telegram_message(f"تنبيه: حدث خطأ أثناء التحديث: {e}")
@@ -123,5 +132,5 @@ def hourly_price_update():
 
 if __name__ == "__main__":
     keep_alive()
-    send_telegram_message("✅ تم تشغيل المحلل الذكي مع توصيات احترافية بصيغة أبو علي.")
+    send_telegram_message("✅ تم تشغيل المحلل الذكي بنجاح: تفاصيل فنية + توصيات تلقائية.")
     Thread(target=hourly_price_update).start()
