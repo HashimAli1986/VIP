@@ -71,19 +71,24 @@ def calculate_indicators(df):
     df["Signal"] = df["MACD"].ewm(span=9).mean()
     return df
 
-def interpret_trend(df):
+def interpret_trend_with_support_resistance(df):
     last = df.iloc[-1]
     prev = df.iloc[-2]
     rsi = last["RSI"]
     macd_cross = last["MACD"] > last["Signal"] and prev["MACD"] < prev["Signal"]
     ema_cross = last["EMA9"] > last["EMA21"] > last["EMA50"]
-    if macd_cross and ema_cross and rsi < 70:
-        return "صاعدة"
-    elif last["MACD"] < last["Signal"] and last["EMA9"] < last["EMA21"] and rsi > 60:
-        return "هابطة"
-    else:
-        return "جانبية"
 
+    support = df["Close"].rolling(window=20).min().iloc[-1]
+    resistance = df["Close"].rolling(window=20).max().iloc[-1]
+
+    if macd_cross and ema_cross and rsi < 70:
+        trend = "صاعدة"
+    elif last["MACD"] < last["Signal"] and last["EMA9"] < last["EMA21"] and rsi > 60:
+        trend = "هابطة"
+    else:
+        trend = "جانبية"
+
+    return trend, support, resistance
 def analyze_and_send():
     df_hour = fetch_data("^GSPC", "1h")
     df_day = fetch_data("^GSPC", "1d")
