@@ -9,7 +9,7 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "تحليل مؤشر S&P 500 يعمل بنجاح"
+    return "تحليل مؤشر S&P 500 والشركات الكبرى يعمل بنجاح"
 
 def run():
     app.run(host='0.0.0.0', port=8080)
@@ -29,6 +29,16 @@ def send_telegram_message(text):
     except Exception as e:
         print(f"Telegram Error: {e}")
 
+companies = {
+    "AAPL": "Apple", "MSFT": "Microsoft", "NVDA": "NVIDIA", "GOOGL": "Alphabet A", "GOOG": "Alphabet C",
+    "AMZN": "Amazon", "META": "Meta Platforms", "BRK.B": "Berkshire Hathaway", "TSLA": "Tesla", "LLY": "Eli Lilly",
+    "V": "Visa", "JNJ": "Johnson & Johnson", "UNH": "UnitedHealth", "JPM": "JPMorgan Chase", "XOM": "Exxon Mobil",
+    "PG": "Procter & Gamble", "MA": "Mastercard", "AVGO": "Broadcom", "HD": "Home Depot", "COST": "Costco",
+    "MRK": "Merck", "PEP": "PepsiCo", "ABBV": "AbbVie", "WMT": "Walmart", "KO": "Coca-Cola",
+    "MSTR": "MicroStrategy", "APP": "AppLovin", "SMCI": "Super Micro Computer", "GS": "Goldman Sachs",
+    "MU": "Micron Technology", "COIN": "Coinbase", "CRWD": "CrowdStrike", "AMD": "Advanced Micro Devices"
+}
+
 def fetch_data(symbol, interval):
     try:
         url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=3mo&interval={interval}"
@@ -39,9 +49,7 @@ def fetch_data(symbol, interval):
         timestamps = result["timestamp"]
         quotes = result["indicators"]["quote"][0]
 
-        # تحقق من وجود الأعمدة الأساسية
         if not all(key in quotes for key in ["close", "open", "high", "low"]):
-            print("⚠️ البيانات ناقصة من المصدر.")
             return None
 
         df = pd.DataFrame({
@@ -55,7 +63,7 @@ def fetch_data(symbol, interval):
         df.set_index("Date", inplace=True)
         return df.dropna()
     except Exception as e:
-        print(f"fetch_data error: {e}")
+        print(f"fetch_data error ({symbol}): {e}")
         return None
 
 def calculate_indicators(df):
@@ -84,13 +92,14 @@ def interpret_trend(df):
     else:
         return "جانبية"
 
-    return trend, support, resistance
 def analyze_and_send():
+    # تحليل S&P 500
     df_hour = fetch_data("^GSPC", "1h")
     df_day = fetch_data("^GSPC", "1d")
     if df_hour is None or df_day is None:
         send_telegram_message("⚠️ تعذر جلب بيانات S&P 500.")
         return
+
     df_hour = calculate_indicators(df_hour)
     df_day = calculate_indicators(df_day)
     dir_1h = interpret_trend(df_hour)
@@ -101,14 +110,25 @@ def analyze_and_send():
         else "تذبذب أو غير مؤكد"
     )
     price = df_hour["Close"].iloc[-1]
-    msg = (
-        f"📊 تحليل مؤشر S&P 500 – {datetime.utcnow().strftime('%H:%M')} UTC\n"
-        f"السعر الحالي: {price:.2f}\n"
-        f"فريم الساعة: {dir_1h}\n"
-        f"فريم اليومي: {dir_1d}\n"
-        f"الاتجاه العام: {final}"
-    )
-    send_telegram_message(msg)
+    msg = f"📊 تحليل مؤشر S&P 500 – {datetime.utcnow().strftime('%H:%M')} UTC\n" \
+          f"السعر الحالي: {price:.2f}\n" \
+          f"فريم الساعة: {dir_1h}\n" \
+          f"فريم اليومي: {dir_1d}\n" \
+          f"الاتجاه العام: {final}\n\n"
+
+    # تحليل كل الشركات
+    msg += "📈 تحليل الشركات الكبرى:\n\n"
+    for symbol, name in companies.items():
+        df = fetch_data(symbol, "1d")
+        if df is None or len(df) < 20:
+            msg += f"{name} ({symbol}): تعذر في البيانات\n"
+            continue
+        df = calculate_indicators(df)
+        direction = interpret_trend(df)
+        price = df["Close"].iloc[-1]
+        msg += f"{name} ({symbol}): {direction} – السعر: {price:.2f}\n"
+
+    send_telegram_message(msg.strip())
 
 def hourly_loop():
     last_sent = -1
@@ -121,5 +141,5 @@ def hourly_loop():
 
 if __name__ == "__main__":
     keep_alive()
-    send_telegram_message("✅ تم تشغيل تحليل مؤشر S&P 500.")
+    send_telegram_message("✅ تم تشغيل تحليل مؤشر S&P 500 والشركات الكبرى.")
     Thread(target=hourly_loop).start()
