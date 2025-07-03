@@ -79,6 +79,15 @@ def calculate_indicators(df):
     df["Signal"] = df["MACD"].ewm(span=9).mean()
     return df
 
+def is_strong_breakout(df):
+    last = df.iloc[-1]
+    prev = df.iloc[-2]
+    rsi = last["RSI"]
+    macd_cross = last["MACD"] > last["Signal"] and prev["MACD"] < prev["Signal"]
+    up_breakout = last["Close"] > prev["High"] and rsi < 70 and macd_cross
+    down_breakout = last["Close"] < prev["Low"] and rsi > 30 and not macd_cross
+    return up_breakout, down_breakout
+
 def interpret_trend(df):
     last = df.iloc[-1]
     prev = df.iloc[-2]
