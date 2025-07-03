@@ -38,11 +38,24 @@ def fetch_data(symbol, interval):
         result = data["chart"]["result"][0]
         timestamps = result["timestamp"]
         quotes = result["indicators"]["quote"][0]
-        df = pd.DataFrame(quotes)
+
+        # تحقق من وجود الأعمدة الأساسية
+        if not all(key in quotes for key in ["close", "open", "high", "low"]):
+            print("⚠️ البيانات ناقصة من المصدر.")
+            return None
+
+        df = pd.DataFrame({
+            "Close": quotes["close"],
+            "Open": quotes["open"],
+            "High": quotes["high"],
+            "Low": quotes["low"]
+        })
+
         df["Date"] = pd.to_datetime(timestamps, unit="s")
         df.set_index("Date", inplace=True)
         return df.dropna()
-    except:
+    except Exception as e:
+        print(f"fetch_data error: {e}")
         return None
 
 def calculate_indicators(df):
