@@ -120,12 +120,17 @@ def analyze_and_send():
         dir_1h = interpret_trend(df_1h)
         dir_1d = interpret_trend(df_1d)
         price = df_1h["Close"].iloc[-1]
+        rsi = df_1d["RSI"].iloc[-1]
+        macd = df_1d["MACD"].iloc[-1]
+        signal = df_1d["Signal"].iloc[-1]
 
         msg += (
             f"{name} – {datetime.utcnow().strftime('%H:%M')} UTC\n"
             f"السعر الحالي: {price:.2f}\n"
             f"فريم الساعة: {dir_1h}\n"
             f"فريم اليومي: {dir_1d}\n"
+            f"RSI: {rsi:.2f}\n"
+            f"MACD: {macd:.2f} / {signal:.2f}\n"
             f"الاتجاه العام: "
             f"{'صاعدة قوية' if dir_1h == 'صاعدة' and dir_1d == 'صاعدة' else 'هابطة قوية' if dir_1h == 'هابطة' and dir_1d == 'هابطة' else 'تذبذب أو غير مؤكد'}\n\n"
         )
