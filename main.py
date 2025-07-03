@@ -39,8 +39,9 @@ def fetch_data(symbol, interval):
         timestamps = result["timestamp"]
         quotes = result["indicators"]["quote"][0]
 
-        if not all(key in quotes for key in ["close", "open", "high", "low"]):
-            print("⚠️ البيانات ناقصة من المصدر.")
+        # التحقق من وجود البيانات الكاملة
+        if not all(k in quotes and quotes[k] is not None for k in ["close", "open", "high", "low"]):
+            print(f"⚠️ البيانات ناقصة أو غير صالحة لـ {symbol}")
             return None
 
         df = pd.DataFrame({
@@ -54,9 +55,9 @@ def fetch_data(symbol, interval):
         df.set_index("Date", inplace=True)
         return df.dropna()
     except Exception as e:
-        print(f"fetch_data error: {e}")
+        print(f"fetch_data error ({symbol}): {e}")
         return None
-
+        
 def calculate_indicators(df):
     df["EMA9"] = df["Close"].ewm(span=9).mean()
     df["EMA21"] = df["Close"].ewm(span=21).mean()
