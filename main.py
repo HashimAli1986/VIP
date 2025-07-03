@@ -113,33 +113,33 @@ def analyze_and_send():
     }
 
     for symbol, name in assets.items():
-        df_1h = fetch_data(symbol, "1h")
-        df_1d = fetch_data(symbol, "1d")
+    df_1h = fetch_data(symbol, "1h")
+    df_1d = fetch_data(symbol, "1d")
 
-        if df_1h is None or df_1d is None:
-            msg += f"{name}: ⚠️ تعذر جلب البيانات.\n\n"
-            continue
+    # تحقق أن الأعمدة الأساسية موجودة
+    if (df_1h is None or df_1d is None or 
+        "Close" not in df_1h.columns or "Close" not in df_1d.columns):
+        msg += f"{name} ({symbol}): ⚠️ البيانات غير مكتملة أو مفقودة.\n\n"
+        continue
 
-        df_1h = calculate_indicators(df_1h)
-        df_1d = calculate_indicators(df_1d)
+    df_1h = calculate_indicators(df_1h)
+    df_1d = calculate_indicators(df_1d)
 
-        dir_1h = interpret_trend(df_1h)
-        dir_1d = interpret_trend(df_1d)
-        price = df_1h["Close"].iloc[-1]
-        rsi = df_1d["RSI"].iloc[-1]
-        macd = df_1d["MACD"].iloc[-1]
-        signal = df_1d["Signal"].iloc[-1]
+    dir_1h = interpret_trend(df_1h)
+    dir_1d = interpret_trend(df_1d)
+    price = df_1h["Close"].iloc[-1]
+    rsi = df_1h["RSI"].iloc[-1]
+    macd = df_1h["MACD"].iloc[-1]
 
-        msg += (
-            f"{name} – {datetime.utcnow().strftime('%H:%M')} UTC\n"
-            f"السعر الحالي: {price:.2f}\n"
-            f"RSI: {rsi:.2f}\n"
-            f"MACD: {macd:.2f} / {signal:.2f}\n"
-            f"فريم الساعة: {dir_1h}\n"
-            f"فريم اليومي: {dir_1d}\n"
-            f"الاتجاه العام: "
-            f"{'صاعدة قوية' if dir_1h == 'صاعدة' and dir_1d == 'صاعدة' else 'هابطة قوية' if dir_1h == 'هابطة' and dir_1d == 'هابطة' else 'تذبذب أو غير مؤكد'}\n\n"
-        )
+    msg += (
+        f"{name} – {datetime.utcnow().strftime('%H:%M')} UTC\n"
+        f"السعر الحالي: {price:.2f}\n"
+        f"RSI: {rsi:.2f} | MACD: {macd:.2f}\n"
+        f"فريم الساعة: {dir_1h}\n"
+        f"فريم اليومي: {dir_1d}\n"
+        f"الاتجاه العام: "
+        f"{'صاعدة قوية' if dir_1h == 'صاعدة' and dir_1d == 'صاعدة' else 'هابطة قوية' if dir_1h == 'هابطة' and dir_1d == 'هابطة' else 'تذبذب أو غير مؤكد'}\n\n"
+    )
 
     send_telegram_message(msg.strip())
 
