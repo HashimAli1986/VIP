@@ -9,7 +9,7 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "تحليل مؤشر S&P 500 والشركات الكبرى يعمل بنجاح"
+    return "تحليل الشركات الكبرى يعمل بنجاح"
 
 def run():
     app.run(host='0.0.0.0', port=8080)
@@ -29,16 +29,6 @@ def send_telegram_message(text):
     except Exception as e:
         print(f"Telegram Error: {e}")
 
-companies = {
-    "AAPL": "Apple", "MSFT": "Microsoft", "NVDA": "NVIDIA", "GOOGL": "Alphabet A", "GOOG": "Alphabet C",
-    "AMZN": "Amazon", "META": "Meta Platforms", "BRK.B": "Berkshire Hathaway", "TSLA": "Tesla", "LLY": "Eli Lilly",
-    "V": "Visa", "JNJ": "Johnson & Johnson", "UNH": "UnitedHealth", "JPM": "JPMorgan Chase", "XOM": "Exxon Mobil",
-    "PG": "Procter & Gamble", "MA": "Mastercard", "AVGO": "Broadcom", "HD": "Home Depot", "COST": "Costco",
-    "MRK": "Merck", "PEP": "PepsiCo", "ABBV": "AbbVie", "WMT": "Walmart", "KO": "Coca-Cola",
-    "MSTR": "MicroStrategy", "APP": "AppLovin", "SMCI": "Super Micro Computer", "GS": "Goldman Sachs",
-    "MU": "Micron Technology", "COIN": "Coinbase", "CRWD": "CrowdStrike", "AMD": "Advanced Micro Devices"
-}
-
 def fetch_data(symbol, interval):
     try:
         url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=3mo&interval={interval}"
@@ -50,6 +40,7 @@ def fetch_data(symbol, interval):
         quotes = result["indicators"]["quote"][0]
 
         if not all(key in quotes for key in ["close", "open", "high", "low"]):
+            print("⚠️ البيانات ناقصة من المصدر.")
             return None
 
         df = pd.DataFrame({
@@ -63,7 +54,7 @@ def fetch_data(symbol, interval):
         df.set_index("Date", inplace=True)
         return df.dropna()
     except Exception as e:
-        print(f"fetch_data error ({symbol}): {e}")
+        print(f"fetch_data error: {e}")
         return None
 
 def calculate_indicators(df):
@@ -124,19 +115,15 @@ def analyze_and_send():
         macd = df_1d["MACD"].iloc[-1]
         signal = df_1d["Signal"].iloc[-1]
 
-        trend_summary = (
-            "صاعدة قوية" if dir_1h == "صاعدة" and dir_1d == "صاعدة"
-            else "هابطة قوية" if dir_1h == "هابطة" and dir_1d == "هابطة"
-            else "تذبذب أو غير مؤكد"
-        )
-
         msg += (
-            f"{name} ({symbol}) – {datetime.utcnow().strftime('%H:%M')} UTC\n"
+            f"{name} – {datetime.utcnow().strftime('%H:%M')} UTC\n"
             f"السعر الحالي: {price:.2f}\n"
+            f"RSI: {rsi:.2f}\n"
+            f"MACD: {macd:.2f} / {signal:.2f}\n"
             f"فريم الساعة: {dir_1h}\n"
             f"فريم اليومي: {dir_1d}\n"
-            f"RSI: {rsi:.2f} | MACD: {macd:.2f} / {signal:.2f}\n"
-            f"الاتجاه العام: {trend_summary}\n\n"
+            f"الاتجاه العام: "
+            f"{'صاعدة قوية' if dir_1h == 'صاعدة' and dir_1d == 'صاعدة' else 'هابطة قوية' if dir_1h == 'هابطة' and dir_1d == 'هابطة' else 'تذبذب أو غير مؤكد'}\n\n"
         )
 
     send_telegram_message(msg.strip())
@@ -152,5 +139,5 @@ def hourly_loop():
 
 if __name__ == "__main__":
     keep_alive()
-    send_telegram_message("✅ تم تشغيل تحليل مؤشر S&P 500 والشركات الكبرى.")
+    send_telegram_message("✅ تم تشغيل تحليل الشركات الكبرى.")
     Thread(target=hourly_loop).start()
