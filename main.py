@@ -116,7 +116,6 @@ def analyze_and_send():
     df_1h = fetch_data(symbol, "1h")
     df_1d = fetch_data(symbol, "1d")
 
-    # تحقق أن الأعمدة الأساسية موجودة
     if (df_1h is None or df_1d is None or 
         "Close" not in df_1h.columns or "Close" not in df_1d.columns):
         msg += f"{name} ({symbol}): ⚠️ البيانات غير مكتملة أو مفقودة.\n\n"
