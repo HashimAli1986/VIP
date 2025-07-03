@@ -5,11 +5,11 @@ from datetime import datetime
 from flask import Flask
 from threading import Thread
 
-app = Flask('')
+app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "المحلل الذكي يعمل بنجاح"
+    return "تحليل مؤشر S&P 500 يعمل بنجاح"
 
 def run():
     app.run(host='0.0.0.0', port=8080)
@@ -29,108 +29,83 @@ def send_telegram_message(text):
     except Exception as e:
         print(f"Telegram Error: {e}")
 
-assets = {
-    "ذهب": {"symbol": "GC=F"},
-    "بيتكوين": {"symbol": "BTC-USD"},
-    "SPX": {"symbol": "^GSPC"},
-    "NDX": {"symbol": "^NDX"}
-}
-
-def fetch_daily_data(symbol):
+def fetch_data(symbol, interval):
     try:
-        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=5y&interval=1d"
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=3mo&interval={interval}"
         headers = {"User-Agent": "Mozilla/5.0"}
         response = requests.get(url, headers=headers)
         data = response.json()
-        if not data["chart"]["result"]:
-            return None
         result = data["chart"]["result"][0]
         timestamps = result["timestamp"]
-        prices = result["indicators"]["quote"][0]
-        if not all(k in prices for k in ["open", "high", "low", "close"]):
-            return None
-        df = pd.DataFrame({
-            "Open": prices["open"],
-            "High": prices["high"],
-            "Low": prices["low"],
-            "Close": prices["close"]
-        })
+        quotes = result["indicators"]["quote"][0]
+        df = pd.DataFrame(quotes)
         df["Date"] = pd.to_datetime(timestamps, unit="s")
         df.set_index("Date", inplace=True)
-        return df.dropna().iloc[-1000:]
-    except Exception as e:
-        print(f"fetch_data error ({symbol}): {e}")
+        return df.dropna()
+    except:
         return None
 
 def calculate_indicators(df):
     df["EMA9"] = df["Close"].ewm(span=9).mean()
     df["EMA21"] = df["Close"].ewm(span=21).mean()
+    df["EMA50"] = df["Close"].ewm(span=50).mean()
     delta = df["Close"].diff()
-    gain = delta.where(delta > 0, 0).rolling(14).mean()
-    loss = -delta.where(delta < 0, 0).rolling(14).mean()
+    gain = delta.clip(lower=0).rolling(14).mean()
+    loss = -delta.clip(upper=0).rolling(14).mean()
     rs = gain / loss
     df["RSI"] = 100 - (100 / (1 + rs))
-    df["Support"] = df["Low"].rolling(50).min()
-    df["Resistance"] = df["High"].rolling(50).max()
+    df["MACD"] = df["Close"].ewm(span=12).mean() - df["Close"].ewm(span=26).mean()
+    df["Signal"] = df["MACD"].ewm(span=9).mean()
     return df
 
-def analyze_next_hour_direction(df):
+def interpret_trend(df):
     last = df.iloc[-1]
     prev = df.iloc[-2]
-    direction = "صاعدة" if last["Close"] > last["Open"] else "هابطة"
-    ema_cross = "صعود" if prev["EMA9"] < prev["EMA21"] and last["EMA9"] > last["EMA21"] else "هبوط" if prev["EMA9"] > prev["EMA21"] and last["EMA9"] < last["EMA21"] else "جانبي"
-    rsi_zone = "تشبع بيع" if last["RSI"] < 30 else "تشبع شراء" if last["RSI"] > 70 else "محايد"
-    return last["Close"], direction, ema_cross, rsi_zone, last["RSI"], last["Support"], last["Resistance"]
-
-def generate_full_report(name, price, direction, ema_cross, rsi_value, rsi_zone, support, resistance):
-    summary = (
-        f"{name}:\n"
-        f"السعر الحالي: {price:.2f}\n"
-        f"الاتجاه المتوقع: {direction}\n"
-        f"تقاطع EMA: {ema_cross}\n"
-        f"RSI: {rsi_value:.2f} ({rsi_zone})\n"
-        f"الدعم: {support:.2f} | المقاومة: {resistance:.2f}"
-    )
-
-    if name == "ذهب":
-        if direction == "صاعدة" and ema_cross == "صعود":
-            recommendation = f"التوصية: شراء | الدخول: {price:.0f}-{price+3:.0f} | الهدف: {price+15:.0f} | الوقف: {price-10:.0f} | القوة: قوية"
-        else:
-            recommendation = f"التوصية: بيع | الدخول: {price-2:.0f}-{price+1:.0f} | الهدف: {price-20:.0f} | الوقف: {price+10:.0f} | القوة: متوسطة"
-    elif name == "بيتكوين":
-        recommendation = f"التوصية: بيع | الدخول: {price-100:.0f}-{price+100:.0f} | الهدف: {price-2000:.0f} | الوقف: {price+1000:.0f} | القوة: متوسطة إلى قوية"
-    elif name == "SPX":
-        recommendation = f"التوصية: بيع | الدخول: {price:.0f}-{price+10:.0f} | الهدف: {price-40:.0f} | الوقف: {price+30:.0f} | القوة: قوية"
-    elif name == "NDX":
-        recommendation = f"التوصية: بيع | الدخول: {price:.0f}-{price+20:.0f} | الهدف: {price-150:.0f} | الوقف: {price+100:.0f} | القوة: قوية جدًا"
+    rsi = last["RSI"]
+    macd_cross = last["MACD"] > last["Signal"] and prev["MACD"] < prev["Signal"]
+    ema_cross = last["EMA9"] > last["EMA21"] > last["EMA50"]
+    if macd_cross and ema_cross and rsi < 70:
+        return "صاعدة"
+    elif last["MACD"] < last["Signal"] and last["EMA9"] < last["EMA21"] and rsi > 60:
+        return "هابطة"
     else:
-        recommendation = "التوصية: غير متوفرة"
+        return "جانبية"
 
-    return f"{summary}\n{recommendation}\n"
+def analyze_and_send():
+    df_hour = fetch_data("^GSPC", "1h")
+    df_day = fetch_data("^GSPC", "1d")
+    if df_hour is None or df_day is None:
+        send_telegram_message("⚠️ تعذر جلب بيانات S&P 500.")
+        return
+    df_hour = calculate_indicators(df_hour)
+    df_day = calculate_indicators(df_day)
+    dir_1h = interpret_trend(df_hour)
+    dir_1d = interpret_trend(df_day)
+    final = (
+        "صاعدة قوية" if dir_1h == "صاعدة" and dir_1d == "صاعدة"
+        else "هابطة قوية" if dir_1h == "هابطة" and dir_1d == "هابطة"
+        else "تذبذب أو غير مؤكد"
+    )
+    price = df_hour["Close"].iloc[-1]
+    msg = (
+        f"📊 تحليل مؤشر S&P 500 – {datetime.utcnow().strftime('%H:%M')} UTC\n"
+        f"السعر الحالي: {price:.2f}\n"
+        f"فريم الساعة: {dir_1h}\n"
+        f"فريم اليومي: {dir_1d}\n"
+        f"الاتجاه العام: {final}"
+    )
+    send_telegram_message(msg)
 
-def hourly_price_update():
-    last_sent_hour = -1
+def hourly_loop():
+    last_sent = -1
     while True:
         now = datetime.utcnow()
-        if now.hour != last_sent_hour and now.minute >= 0:
-            last_sent_hour = now.hour
-            try:
-                msg = f"تحديث الساعة {now.strftime('%H:%M')} UTC\n"
-                for name, info in assets.items():
-                    df = fetch_daily_data(info["symbol"])
-                    if df is None or df.empty or len(df) < 1000:
-                        msg += f"\n{name}: البيانات غير متوفرة.\n"
-                    else:
-                        df = calculate_indicators(df)
-                        price, direction, ema_cross, rsi_zone, rsi_value, support, resistance = analyze_next_hour_direction(df)
-                        report = generate_full_report(name, price, direction, ema_cross, rsi_value, rsi_zone, support, resistance)
-                        msg += f"\n{report}"
-                send_telegram_message(msg)
-            except Exception as e:
-                send_telegram_message(f"تنبيه: حدث خطأ أثناء التحديث: {e}")
-        time.sleep(30)
+        if now.hour != last_sent and now.minute >= 0:
+            last_sent = now.hour
+            analyze_and_send()
+        time.sleep(60)
 
 if __name__ == "__main__":
     keep_alive()
-    send_telegram_message("✅ تم تشغيل المحلل الذكي بنجاح: تفاصيل فنية + توصيات تلقائية.")
-    Thread(target=hourly_price_update).start()
+    send_telegram_message("✅ تم تشغيل تحليل مؤشر S&P 500.")
+    Thread(target=hourly_loop).start()
