@@ -67,16 +67,26 @@ def fetch_data(symbol, interval):
         return None
 
 def calculate_indicators(df):
-    df["EMA9"] = df["Close"].ewm(span=9).mean()
-    df["EMA21"] = df["Close"].ewm(span=21).mean()
-    df["EMA50"] = df["Close"].ewm(span=50).mean()
-    delta = df["Close"].diff()
-    gain = delta.clip(lower=0).rolling(14).mean()
-    loss = -delta.clip(upper=0).rolling(14).mean()
-    rs = gain / loss
+    # حساب المتوسطات المتحركة الأسية
+    df["EMA9"] = df["Close"].ewm(span=9, adjust=False).mean()
+    df["EMA21"] = df["Close"].ewm(span=21, adjust=False).mean()
+    df["EMA50"] = df["Close"].ewm(span=50, adjust=False).mean()
+    
+    # حساب RSI
+    delta = df["Close"].diff(1)
+    gain = delta.where(delta > 0, 0)
+    loss = -delta.where(delta < 0, 0)
+    avg_gain = gain.rolling(window=14).mean()
+    avg_loss = loss.rolling(window=14).mean()
+    rs = avg_gain / avg_loss
     df["RSI"] = 100 - (100 / (1 + rs))
-    df["MACD"] = df["Close"].ewm(span=12).mean() - df["Close"].ewm(span=26).mean()
-    df["Signal"] = df["MACD"].ewm(span=9).mean()
+    
+    # حساب MACD وخط الإشارة
+    ema12 = df["Close"].ewm(span=12, adjust=False).mean()
+    ema26 = df["Close"].ewm(span=26, adjust=False).mean()
+    df["MACD"] = ema12 - ema26
+    df["Signal"] = df["MACD"].ewm(span=9, adjust=False).mean()
+    
     return df
 
 def is_strong_breakout(df):
@@ -84,8 +94,9 @@ def is_strong_breakout(df):
     prev = df.iloc[-2]
     rsi = last["RSI"]
     macd_cross = last["MACD"] > last["Signal"] and prev["MACD"] < prev["Signal"]
+    macd_negative_cross = last["MACD"] < last["Signal"] and prev["MACD"] > prev["Signal"]
     up_breakout = last["Close"] > prev["High"] and rsi < 70 and macd_cross
-    down_breakout = last["Close"] < prev["Low"] and rsi > 30 and not macd_cross
+    down_breakout = last["Close"] < prev["Low"] and rsi > 30 and macd_negative_cross
     return up_breakout, down_breakout
 
 def interpret_trend(df):
@@ -94,9 +105,15 @@ def interpret_trend(df):
     rsi = last["RSI"]
     macd_cross = last["MACD"] > last["Signal"] and prev["MACD"] < prev["Signal"]
     ema_cross = last["EMA9"] > last["EMA21"] > last["EMA50"]
+    macd_negative_cross = last["MACD"] < last["Signal"] and prev["MACD"] > prev["Signal"]
+    
     if macd_cross and ema_cross and rsi < 70:
+        return "صاعدة قوية"
+    elif macd_negative_cross and last["EMA9"] < last["EMA21"] and rsi > 60:
+        return "هابطة قوية"
+    elif last["MACD"] > last["Signal"] and rsi < 60:
         return "صاعدة"
-    elif last["MACD"] < last["Signal"] and last["EMA9"] < last["EMA21"] and rsi > 60:
+    elif last["MACD"] < last["Signal"] and rsi > 40:
         return "هابطة"
     else:
         return "جانبية"
@@ -129,14 +146,42 @@ def analyze_and_send():
         dir_1h = interpret_trend(df_1h)
         dir_1d = interpret_trend(df_1d)
         price = df_1h["Close"].iloc[-1]
+        
+        # تحليل RSI و MACD
+        rsi_1h = df_1h["RSI"].iloc[-1]
+        rsi_1d = df_1d["RSI"].iloc[-1]
+        macd_1h = df_1h["MACD"].iloc[-1]
+        macd_1d = df_1d["MACD"].iloc[-1]
+        
+        # إضافة تحليل المؤشرات
+        rsi_analysis = ""
+        if rsi_1h > 70:
+            rsi_analysis += "RSI الساعة: تشبع بيعي ⚠️"
+        elif rsi_1h < 30:
+            rsi_analysis += "RSI الساعة: تشبع شرائي ✅"
+            
+        if rsi_1d > 70:
+            rsi_analysis += " | RSI اليومي: تشبع بيعي ⚠️"
+        elif rsi_1d < 30:
+            rsi_analysis += " | RSI اليومي: تشبع شرائي ✅"
+            
+        macd_analysis = ""
+        if macd_1h > df_1h["Signal"].iloc[-1]:
+            macd_analysis += "MACD الساعة: إيجابي 📈"
+        else:
+            macd_analysis += "MACD الساعة: سلبي 📉"
+            
+        if macd_1d > df_1d["Signal"].iloc[-1]:
+            macd_analysis += " | MACD اليومي: إيجابي 📈"
+        else:
+            macd_analysis += " | MACD اليومي: سلبي 📉"
 
         msg += (
-            f"{name} – {datetime.utcnow().strftime('%H:%M')} UTC\n"
-            f"السعر الحالي: {price:.2f}\n"
+            f"📈 {name} – السعر: {price:.2f}\n"
             f"فريم الساعة: {dir_1h}\n"
             f"فريم اليومي: {dir_1d}\n"
-            f"الاتجاه العام: "
-            f"{'صاعدة قوية' if dir_1h == 'صاعدة' and dir_1d == 'صاعدة' else 'هابطة قوية' if dir_1h == 'هابطة' and dir_1d == 'هابطة' else 'تذبذب أو غير مؤكد'}\n\n"
+            f"{rsi_analysis}\n"
+            f"{macd_analysis}\n\n"
         )
 
     send_telegram_message(msg.strip())
@@ -147,10 +192,14 @@ def hourly_loop():
         now = datetime.utcnow()
         if now.hour != last_sent and now.minute >= 0:
             last_sent = now.hour
-            analyze_and_send()
+            try:
+                analyze_and_send()
+            except Exception as e:
+                print(f"Error in analysis: {e}")
+                send_telegram_message(f"⚠️ حدث خطأ في التحليل: {str(e)[:100]}")
         time.sleep(60)
 
 if __name__ == "__main__":
     keep_alive()
-    send_telegram_message("✅ تم تشغيل تحليل مؤشر S&P 500 والشركات الكبرى.")
+    send_telegram_message("✅ تم تشغيل تحليل مؤشر S&P 500 والشركات الكبرى مع مؤشرات RSI و MACD.")
     Thread(target=hourly_loop).start()
