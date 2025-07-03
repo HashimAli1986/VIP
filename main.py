@@ -35,14 +35,21 @@ def fetch_data(symbol, interval):
         headers = {"User-Agent": "Mozilla/5.0"}
         response = requests.get(url, headers=headers)
         data = response.json()
+
+        if not data or "chart" not in data or not data["chart"]["result"]:
+            print(f"⚠️ لا توجد بيانات صالحة لـ {symbol}")
+            return None
+
         result = data["chart"]["result"][0]
-        timestamps = result["timestamp"]
+        timestamps = result.get("timestamp")
         quotes = result["indicators"]["quote"][0]
 
-        # التحقق من وجود البيانات الكاملة
-        if not all(k in quotes and quotes[k] is not None for k in ["close", "open", "high", "low"]):
-            print(f"⚠️ البيانات ناقصة أو غير صالحة لـ {symbol}")
-            return None
+        # التحقق من وجود الأعمدة كاملة وغير فارغة
+        required_keys = ["close", "open", "high", "low"]
+        for key in required_keys:
+            if key not in quotes or quotes[key] is None or all(v is None for v in quotes[key]):
+                print(f"⚠️ البيانات ناقصة أو فاضية لـ {symbol} ({key})")
+                return None
 
         df = pd.DataFrame({
             "Close": quotes["close"],
@@ -53,9 +60,16 @@ def fetch_data(symbol, interval):
 
         df["Date"] = pd.to_datetime(timestamps, unit="s")
         df.set_index("Date", inplace=True)
-        return df.dropna()
+        df = df.dropna()
+
+        if df.empty or len(df) < 10:
+            print(f"⚠️ الداتا فاضية بعد التنظيف لـ {symbol}")
+            return None
+
+        return df
+
     except Exception as e:
-        print(f"fetch_data error ({symbol}): {e}")
+        print(f"❌ fetch_data error ({symbol}): {e}")
         return None
         
 def calculate_indicators(df):
