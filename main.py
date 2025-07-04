@@ -38,7 +38,7 @@ def send_telegram_message(text):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     data = {"chat_id": CHANNEL_ID, "text": text}
     try:
-        response = requests.post(url, data=data)
+        response = requests.post(url, data=data, timeout=20)
         logging.info(f"Telegram response: {response.status_code}")
         return response.status_code == 200
     except Exception as e:
@@ -59,8 +59,8 @@ companies = {
 
 def fetch_data(symbol, interval):
     try:
-        # استخدام yfinance بدلاً من API المباشر
-        end_date = datetime.now()
+        # استخدام yfinance مع معالجة أفضل
+        end_date = datetime.now() + timedelta(days=1)  # تضمين اليوم الحالي
         start_date = end_date - timedelta(days=90)
         
         # تحويل الفاصل الزمني إلى صيغة yfinance
@@ -70,27 +70,30 @@ def fetch_data(symbol, interval):
         }
         yf_interval = interval_map.get(interval, '1d')
         
-        df = yf.download(
-            symbol, 
-            start=start_date, 
-            end=end_date, 
-            interval=yf_interval,
-            progress=False
-        )
+        # تحميل البيانات مع محاولات متعددة
+        for attempt in range(3):
+            try:
+                df = yf.download(
+                    symbol, 
+                    start=start_date, 
+                    end=end_date, 
+                    interval=yf_interval,
+                    progress=False,
+                    auto_adjust=True,  # استخدام الأسعار المعدلة
+                    threads=True,      # تمكين الخيوط
+                    timeout=10         # مهلة أطول
+                )
+                
+                if not df.empty:
+                    return df[['Open', 'High', 'Low', 'Close']]
+                    
+                time.sleep(2)  # انتظار قبل المحاولة التالية
+            except Exception as e:
+                logging.warning(f"Attempt {attempt+1} failed for {symbol}: {e}")
+                time.sleep(3)
         
-        if df.empty:
-            logging.warning(f"No data for {symbol} at interval {interval}")
-            return None
-        
-        # إعادة تسمية الأعمدة لتتناسب مع الكود
-        df = df.rename(columns={
-            'Open': 'Open',
-            'High': 'High',
-            'Low': 'Low',
-            'Close': 'Close'
-        })
-        
-        return df[['Open', 'High', 'Low', 'Close']]
+        logging.warning(f"All attempts failed for {symbol} at interval {interval}")
+        return None
     except Exception as e:
         logging.error(f"fetch_data error ({symbol}): {e}")
         return None
@@ -127,6 +130,11 @@ def interpret_trend(df):
     
     last = df.iloc[-1]
     prev = df.iloc[-2]
+    
+    # تجنب الأخطاء مع القيم NaN
+    if any(pd.isna(x) for x in [last["MACD"], last["Signal"], prev["MACD"], prev["Signal"], last["EMA9"], last["EMA21"], last["EMA50"]]):
+        return "بيانات ناقصة"
+    
     rsi = last["RSI"]
     
     # تحديد تقاطع MACD
@@ -154,9 +162,11 @@ def analyze_and_send():
         msg = f"📊 تحديث التحليل الفني – {datetime.utcnow().strftime('%Y-%m-%d %H:%M')} UTC\n\n"
         
         processed = 0
-        for symbol, name in companies.items():
+        total = len(companies)
+        
+        for i, (symbol, name) in enumerate(companies.items()):
             try:
-                logging.info(f"Processing {name} ({symbol})...")
+                logging.info(f"Processing {name} ({symbol}) [{i+1}/{total}]...")
                 
                 # جلب البيانات
                 df_1h = fetch_data(symbol, "1h")
@@ -200,15 +210,17 @@ def analyze_and_send():
                 # تحليل MACD
                 macd_analysis = ""
                 if len(df_1h) > 0 and len(df_1d) > 0:
-                    if df_1h["MACD"].iloc[-1] > df_1h["Signal"].iloc[-1]:
-                        macd_analysis += "MACD الساعة: إيجابي 📈"
-                    else:
-                        macd_analysis += "MACD الساعة: سلبي 📉"
-                        
-                    if df_1d["MACD"].iloc[-1] > df_1d["Signal"].iloc[-1]:
-                        macd_analysis += " | MACD اليومي: إيجابي 📈"
-                    else:
-                        macd_analysis += " | MACD اليومي: سلبي 📉"
+                    if not pd.isna(df_1h["MACD"].iloc[-1]) and not pd.isna(df_1h["Signal"].iloc[-1]):
+                        if df_1h["MACD"].iloc[-1] > df_1h["Signal"].iloc[-1]:
+                            macd_analysis += "MACD الساعة: إيجابي 📈"
+                        else:
+                            macd_analysis += "MACD الساعة: سلبي 📉"
+                    
+                    if not pd.isna(df_1d["MACD"].iloc[-1]) and not pd.isna(df_1d["Signal"].iloc[-1]):
+                        if df_1d["MACD"].iloc[-1] > df_1d["Signal"].iloc[-1]:
+                            macd_analysis += " | MACD اليومي: إيجابي 📈"
+                        else:
+                            macd_analysis += " | MACD اليومي: سلبي 📉"
                 else:
                     macd_analysis = "بيانات MACD غير متوفرة"
                 
@@ -223,47 +235,59 @@ def analyze_and_send():
                 
                 processed += 1
                 # تأخير بين الطلبات لتجنب الحظر
-                time.sleep(2)
+                time.sleep(3)
                 
             except Exception as e:
-                logging.error(f"Error processing {name}: {str(e)}")
+                logging.error(f"Error processing {name}: {str(e)}", exc_info=True)
                 msg += f"⚠️ {name}: خطأ في المعالجة\n\n"
                 continue
         
         if processed > 0:
             # إضافة ملخص في بداية الرسالة
-            summary = f"✅ تم تحليل {processed} من أصل {len(companies)} شركة\n\n"
+            summary = f"✅ تم تحليل {processed} من أصل {total} شركة\n\n"
             msg = summary + msg
         else:
             msg = "⚠️ فشل في معالجة جميع الشركات. يرجى مراجعة السجلات."
         
-        # إرسال الرسالة
-        if not send_telegram_message(msg.strip()):
-            logging.error("Failed to send message")
-            
-        logging.info(f"Analysis completed. Processed {processed} companies.")
+        # تقسيم الرسالة إذا كانت طويلة جداً
+        max_length = 4000
+        if len(msg) > max_length:
+            parts = [msg[i:i+max_length] for i in range(0, len(msg), max_length)]
+            for part in parts:
+                if not send_telegram_message(part):
+                    logging.error("Failed to send message part")
+                time.sleep(2)
+        else:
+            if not send_telegram_message(msg):
+                logging.error("Failed to send message")
+                
+        logging.info(f"Analysis completed. Processed {processed}/{total} companies.")
         
     except Exception as e:
-        logging.error(f"General error in analyze_and_send: {str(e)}")
-        send_telegram_message(f"⚠️ حدث خطأ جسيم في التحليل: {str(e)[:300]}")
+        logging.error(f"General error in analyze_and_send: {str(e)}", exc_info=True)
+        try:
+            send_telegram_message(f"⚠️ حدث خطأ جسيم في التحليل: {str(e)[:300]}")
+        except:
+            logging.error("Failed to send error notification")
 
-def hourly_loop():
-    logging.info("Hourly loop started")
+def hourly_analysis():
+    logging.info("Hourly analysis scheduler started")
     while True:
         now = datetime.utcnow()
+        next_hour = (now + timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
+        sleep_seconds = (next_hour - now).total_seconds()
         
-        # إرسال مرة واحدة كل ساعة في الدقيقة 00
-        if now.minute == 0:
-            logging.info(f"Triggering analysis at {now}")
-            try:
-                analyze_and_send()
-                # الانتظار لمدة دقيقة لتجنب الإرسال المتكرر
-                time.sleep(60)
-            except Exception as e:
-                logging.error(f"Error in hourly analysis: {str(e)}")
+        logging.info(f"Next analysis at: {next_hour} | Sleeping for {sleep_seconds:.0f} seconds")
         
-        # فحص كل 30 ثانية
-        time.sleep(30)
+        if sleep_seconds > 0:
+            time.sleep(sleep_seconds)
+        
+        try:
+            logging.info("Triggering hourly analysis")
+            analyze_and_send()
+        except Exception as e:
+            logging.error(f"Error in hourly analysis: {str(e)}", exc_info=True)
+            time.sleep(60)
 
 if __name__ == "__main__":
     logging.info("Application started")
@@ -273,8 +297,8 @@ if __name__ == "__main__":
     time.sleep(5)
     send_telegram_message("✅ تم تشغيل المحلل الفني بنجاح. جاري تحليل البيانات...")
     
-    # بدء التحليل فورياً
+    # بدء التحليل الأولي في خيط منفصل
     Thread(target=analyze_and_send).start()
     
     # بدء دورة الساعة
-    hourly_loop()
+    hourly_analysis()
