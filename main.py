@@ -127,24 +127,25 @@ def calculate_indicators(df):
 def interpret_trend(df):
     if df is None or len(df) < 3:
         return "غير محدد"
-    
+
     last = df.iloc[-1]
     prev = df.iloc[-2]
-    
-    # تجنب الأخطاء مع القيم NaN
-    if any(pd.isna(x) for x in [last["MACD"], last["Signal"], prev["MACD"], prev["Signal"], last["EMA9"], last["EMA21"], last["EMA50"]]):
+
+    values_to_check = [
+        last.get("MACD"), last.get("Signal"),
+        prev.get("MACD"), prev.get("Signal"),
+        last.get("EMA9"), last.get("EMA21"), last.get("EMA50")
+    ]
+    if any(pd.isna(val) or isinstance(val, pd.Series) for val in values_to_check):
         return "بيانات ناقصة"
-    
+
     rsi = last["RSI"]
-    
-    # تحديد تقاطع MACD
+
     macd_cross = (last["MACD"] > last["Signal"]) and (prev["MACD"] < prev["Signal"])
     macd_negative_cross = (last["MACD"] < last["Signal"]) and (prev["MACD"] > prev["Signal"])
-    
-    # تحديد ترتيب المتوسطات
     ema_cross = (last["EMA9"] > last["EMA21"]) and (last["EMA21"] > last["EMA50"])
     ema_negative_cross = (last["EMA9"] < last["EMA21"]) and (last["EMA21"] < last["EMA50"])
-    
+
     if macd_cross and ema_cross and rsi < 70:
         return "صاعدة قوية"
     elif macd_negative_cross and ema_negative_cross and rsi > 60:
