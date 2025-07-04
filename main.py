@@ -1,10 +1,11 @@
 import requests
 import pandas as pd
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from flask import Flask
 from threading import Thread
 import logging
+import yfinance as yf
 
 # إعداد سجلات التتبع
 logging.basicConfig(
@@ -44,50 +45,60 @@ def send_telegram_message(text):
         logging.error(f"Telegram Error: {e}")
         return False
 
+# قائمة الشركات المعدلة
 companies = {
-    "AAPL": "Apple", "MSFT": "Microsoft", "NVDA": "NVIDIA", "GOOGL": "Alphabet A", "GOOG": "Alphabet C",
-    "AMZN": "Amazon", "META": "Meta Platforms", "BRK.B": "Berkshire Hathaway", "TSLA": "Tesla", "LLY": "Eli Lilly",
-    "V": "Visa", "JNJ": "Johnson & Johnson", "UNH": "UnitedHealth", "JPM": "JPMorgan Chase", "XOM": "Exxon Mobil",
-    "PG": "Procter & Gamble", "MA": "Mastercard", "AVGO": "Broadcom", "HD": "Home Depot", "COST": "Costco",
-    "MRK": "Merck", "PEP": "PepsiCo", "ABBV": "AbbVie", "WMT": "Walmart", "KO": "Coca-Cola",
-    "MSTR": "MicroStrategy", "APP": "AppLovin", "SMCI": "Super Micro Computer", "GS": "Goldman Sachs",
-    "MU": "Micron Technology", "COIN": "Coinbase", "CRWD": "CrowdStrike", "AMD": "Advanced Micro Devices"
+    "AAPL": "Apple", "MSFT": "Microsoft", "NVDA": "NVIDIA", "GOOGL": "Alphabet A", 
+    "AMZN": "Amazon", "META": "Meta Platforms", "TSLA": "Tesla", 
+    "JPM": "JPMorgan Chase", "XOM": "Exxon Mobil", "JNJ": "Johnson & Johnson",
+    "V": "Visa", "PG": "Procter & Gamble", "MA": "Mastercard", "HD": "Home Depot", 
+    "COST": "Costco", "MRK": "Merck", "PEP": "PepsiCo", "WMT": "Walmart", 
+    "KO": "Coca-Cola", "MSTR": "MicroStrategy", "AVGO": "Broadcom", 
+    "GS": "Goldman Sachs", "MU": "Micron Technology", "COIN": "Coinbase", 
+    "AMD": "Advanced Micro Devices"
 }
 
 def fetch_data(symbol, interval):
     try:
-        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=3mo&interval={interval}"
-        headers = {"User-Agent": "Mozilla/5.0"}
-        response = requests.get(url, headers=headers, timeout=10)
-        data = response.json()
+        # استخدام yfinance بدلاً من API المباشر
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=90)
         
-        if "chart" not in data or "error" in data["chart"]:
-            logging.error(f"Yahoo API error for {symbol}: {data.get('chart', {}).get('error', {})}")
+        # تحويل الفاصل الزمني إلى صيغة yfinance
+        interval_map = {
+            '1h': '1h',
+            '1d': '1d'
+        }
+        yf_interval = interval_map.get(interval, '1d')
+        
+        df = yf.download(
+            symbol, 
+            start=start_date, 
+            end=end_date, 
+            interval=yf_interval,
+            progress=False
+        )
+        
+        if df.empty:
+            logging.warning(f"No data for {symbol} at interval {interval}")
             return None
-            
-        result = data["chart"]["result"][0]
-        timestamps = result["timestamp"]
-        quotes = result["indicators"]["quote"][0]
-
-        if not all(key in quotes for key in ["close", "open", "high", "low"]):
-            logging.warning(f"Incomplete data for {symbol}")
-            return None
-
-        df = pd.DataFrame({
-            "Close": quotes["close"],
-            "Open": quotes["open"],
-            "High": quotes["high"],
-            "Low": quotes["low"]
+        
+        # إعادة تسمية الأعمدة لتتناسب مع الكود
+        df = df.rename(columns={
+            'Open': 'Open',
+            'High': 'High',
+            'Low': 'Low',
+            'Close': 'Close'
         })
-
-        df["Date"] = pd.to_datetime(timestamps, unit="s")
-        df.set_index("Date", inplace=True)
-        return df.dropna()
+        
+        return df[['Open', 'High', 'Low', 'Close']]
     except Exception as e:
         logging.error(f"fetch_data error ({symbol}): {e}")
         return None
 
 def calculate_indicators(df):
+    if df is None or df.empty:
+        return df
+    
     # حساب المتوسطات المتحركة الأسية
     df["EMA9"] = df["Close"].ewm(span=9, adjust=False).mean()
     df["EMA21"] = df["Close"].ewm(span=21, adjust=False).mean()
@@ -99,7 +110,7 @@ def calculate_indicators(df):
     loss = -delta.where(delta < 0, 0)
     avg_gain = gain.rolling(window=14, min_periods=1).mean()
     avg_loss = loss.rolling(window=14, min_periods=1).mean()
-    rs = avg_gain / avg_loss
+    rs = avg_gain / (avg_loss + 1e-10)  # تجنب القسمة على الصفر
     df["RSI"] = 100 - (100 / (1 + rs))
     
     # حساب MACD وخط الإشارة
@@ -111,7 +122,7 @@ def calculate_indicators(df):
     return df
 
 def interpret_trend(df):
-    if len(df) < 3:
+    if df is None or len(df) < 3:
         return "غير محدد"
     
     last = df.iloc[-1]
@@ -142,36 +153,32 @@ def analyze_and_send():
         logging.info("Starting analysis...")
         msg = f"📊 تحديث التحليل الفني – {datetime.utcnow().strftime('%Y-%m-%d %H:%M')} UTC\n\n"
         
-        assets = {
-            "MSTR": "MicroStrategy", "APP": "AppLovin", "AVGO": "Broadcom", "SMCI": "Super Micro Computer",
-            "GS": "Goldman Sachs", "MU": "Micron Technology", "META": "Meta Platforms", "AAPL": "Apple",
-            "COIN": "Coinbase", "TSLA": "Tesla", "LLY": "Eli Lilly", "CRWD": "CrowdStrike", "MSFT": "Microsoft",
-            "AMD": "Advanced Micro Devices", "NVDA": "NVIDIA", "GOOGL": "Alphabet (Class A)", "GOOG": "Alphabet (Class C)",
-            "AMZN": "Amazon", "BRK.B": "Berkshire Hathaway", "V": "Visa", "JNJ": "Johnson & Johnson",
-            "UNH": "UnitedHealth", "JPM": "JPMorgan Chase", "XOM": "Exxon Mobil", "PG": "Procter & Gamble",
-            "MA": "Mastercard", "HD": "Home Depot", "COST": "Costco", "MRK": "Merck", "PEP": "PepsiCo",
-            "ABBV": "AbbVie", "WMT": "Walmart", "KO": "Coca-Cola"
-        }
-
         processed = 0
-        for symbol, name in assets.items():
+        for symbol, name in companies.items():
             try:
                 logging.info(f"Processing {name} ({symbol})...")
+                
+                # جلب البيانات
                 df_1h = fetch_data(symbol, "1h")
                 df_1d = fetch_data(symbol, "1d")
-
-                if df_1h is None or df_1d is None:
-                    msg += f"{name}: ⚠️ تعذر جلب البيانات.\n\n"
+                
+                if df_1h is None or df_1h.empty or df_1d is None or df_1d.empty:
+                    logging.warning(f"Data not available for {symbol}")
+                    msg += f"⚠️ {name}: لا توجد بيانات متاحة\n\n"
                     continue
-
+                
+                # حساب المؤشرات
                 df_1h = calculate_indicators(df_1h)
                 df_1d = calculate_indicators(df_1d)
-
+                
+                # تفسير الاتجاه
                 dir_1h = interpret_trend(df_1h)
                 dir_1d = interpret_trend(df_1d)
+                
+                # الحصول على السعر الحالي
                 price = df_1h["Close"].iloc[-1] if len(df_1h) > 0 else 0
                 
-                # تحليل RSI و MACD
+                # تحليل RSI
                 rsi_1h = df_1h["RSI"].iloc[-1] if len(df_1h) > 0 else 0
                 rsi_1d = df_1d["RSI"].iloc[-1] if len(df_1d) > 0 else 0
                 
@@ -189,7 +196,8 @@ def analyze_and_send():
                     rsi_analysis += " | RSI اليومي: تشبع شرائي ✅"
                 else:
                     rsi_analysis += " | RSI اليومي: طبيعي"
-                    
+                
+                # تحليل MACD
                 macd_analysis = ""
                 if len(df_1h) > 0 and len(df_1d) > 0:
                     if df_1h["MACD"].iloc[-1] > df_1h["Signal"].iloc[-1]:
@@ -203,40 +211,37 @@ def analyze_and_send():
                         macd_analysis += " | MACD اليومي: سلبي 📉"
                 else:
                     macd_analysis = "بيانات MACD غير متوفرة"
-
+                
+                # بناء الرسالة
                 msg += (
                     f"📈 {name} – السعر: {price:.2f}\n"
-                    f"فريم الساعة: {dir_1h}\n"
-                    f"فريم اليومي: {dir_1d}\n"
+                    f"اتجاه الساعة: {dir_1h}\n"
+                    f"اتجاه اليوم: {dir_1d}\n"
                     f"{rsi_analysis}\n"
                     f"{macd_analysis}\n\n"
                 )
                 
                 processed += 1
-                # تأخير بين الطلبات لتجنب حظر ياهو
-                time.sleep(1)
+                # تأخير بين الطلبات لتجنب الحظر
+                time.sleep(2)
                 
             except Exception as e:
                 logging.error(f"Error processing {name}: {str(e)}")
-                msg += f"{name}: ⚠️ خطأ في المعالجة\n\n"
+                msg += f"⚠️ {name}: خطأ في المعالجة\n\n"
                 continue
-
-        if processed == 0:
-            msg = "⚠️ فشل في معالجة جميع الشركات"
-
-        # تقسيم الرسالة إذا كانت طويلة جداً
-        max_length = 4000
-        if len(msg) > max_length:
-            parts = [msg[i:i+max_length] for i in range(0, len(msg), max_length)]
-            for part in parts:
-                if not send_telegram_message(part):
-                    logging.error("Failed to send message part")
-                time.sleep(1)
+        
+        if processed > 0:
+            # إضافة ملخص في بداية الرسالة
+            summary = f"✅ تم تحليل {processed} من أصل {len(companies)} شركة\n\n"
+            msg = summary + msg
         else:
-            if not send_telegram_message(msg):
-                logging.error("Failed to send message")
-                
-        logging.info("Analysis completed and sent successfully")
+            msg = "⚠️ فشل في معالجة جميع الشركات. يرجى مراجعة السجلات."
+        
+        # إرسال الرسالة
+        if not send_telegram_message(msg.strip()):
+            logging.error("Failed to send message")
+            
+        logging.info(f"Analysis completed. Processed {processed} companies.")
         
     except Exception as e:
         logging.error(f"General error in analyze_and_send: {str(e)}")
@@ -244,31 +249,32 @@ def analyze_and_send():
 
 def hourly_loop():
     logging.info("Hourly loop started")
-    last_sent_hour = -1
     while True:
         now = datetime.utcnow()
-        current_hour = now.hour
         
         # إرسال مرة واحدة كل ساعة في الدقيقة 00
-        if now.minute == 0 and current_hour != last_sent_hour:
-            logging.info(f"Triggering analysis for hour {current_hour}")
+        if now.minute == 0:
+            logging.info(f"Triggering analysis at {now}")
             try:
                 analyze_and_send()
-                last_sent_hour = current_hour
-                logging.info(f"Analysis for hour {current_hour} completed")
+                # الانتظار لمدة دقيقة لتجنب الإرسال المتكرر
+                time.sleep(60)
             except Exception as e:
                 logging.error(f"Error in hourly analysis: {str(e)}")
-            # انتظار حتى انتهاء الدقيقة
-            time.sleep(60)
-        else:
-            # فحص كل 30 ثانية
-            time.sleep(30)
+        
+        # فحص كل 30 ثانية
+        time.sleep(30)
 
 if __name__ == "__main__":
     logging.info("Application started")
     keep_alive()
-    send_telegram_message("✅ تم تشغيل تحليل مؤشر S&P 500 والشركات الكبرى مع مؤشرات RSI و MACD.")
-    # بدء التحليل فوراً
+    
+    # إرسال رسالة البدء بعد التأكد من عمل البوت
+    time.sleep(5)
+    send_telegram_message("✅ تم تشغيل المحلل الفني بنجاح. جاري تحليل البيانات...")
+    
+    # بدء التحليل فورياً
     Thread(target=analyze_and_send).start()
+    
     # بدء دورة الساعة
-    Thread(target=hourly_loop).start()
+    hourly_loop()
